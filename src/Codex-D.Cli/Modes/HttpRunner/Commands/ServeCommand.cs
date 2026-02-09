@@ -167,7 +167,12 @@ public sealed class ServeCommand : AsyncCommand<ServeCommand.Settings>
 
             if (health == RunnerHealthStatus.Ok)
             {
-                if (settings.Force || (isDev && !string.Equals(installedVersion, desiredVersion, StringComparison.Ordinal)))
+                var needsDevReplace =
+                    isDev &&
+                    (!string.Equals(installedVersion, desiredVersion, StringComparison.Ordinal) ||
+                     !string.Equals(runtime.Version, desiredVersion, StringComparison.Ordinal));
+
+                if (settings.Force || needsDevReplace)
                 {
                     await StopDaemonAsync(runtimePath, runtime.Pid, cancellationToken);
                 }

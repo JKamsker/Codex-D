@@ -308,23 +308,23 @@ Command-line flags always win over env vars.
 
 ### C) Daemon serve command (Windows detached)
 
-* [ ] Add flag to server command:
+* [x] Add flag to server command:
 
-  * [ ] `http serve -d|--daemon` (Windows-only)
-* [ ] Implement “parent/child” strategy:
+  * [x] `http serve -d|--daemon` (Windows-only)
+* [x] Implement “parent/child” strategy:
 
-  * [ ] Parent spawns child process with hidden/internal `--daemon-child` flag.
-  * [ ] Child runs the real Kestrel server and writes runtime file.
-  * [ ] Parent exits after confirming runtime file + successful health response.
-* [ ] Ensure daemon defaults:
+  * [x] Parent spawns child process with hidden/internal `--daemon-child` flag.
+  * [x] Child runs the real Kestrel server and writes runtime file.
+  * [x] Parent exits after confirming runtime file + successful health response.
+* [x] Ensure daemon defaults:
 
-  * [ ] `listen=127.0.0.1`
-  * [ ] `port=0`
-  * [ ] `stateDir=%LOCALAPPDATA%\codex-d\daemon\config`
-  * [ ] auth required
-* [ ] On non-Windows:
+  * [x] `listen=127.0.0.1`
+  * [x] `port=0`
+  * [x] `stateDir=%LOCALAPPDATA%\codex-d\daemon\config`
+  * [x] auth required
+* [x] On non-Windows:
 
-  * [ ] `http serve -d` prints “Windows-only” error and exits non-zero.
+  * [x] `http serve -d` prints “Windows-only” error and exits non-zero.
 
 ### D) Copy/install-self to daemon bin dir (Windows)
 
@@ -342,11 +342,11 @@ Command-line flags always win over env vars.
 
 ### E) Daemon runtime file write
 
-* [ ] Add runtime file writer:
+* [x] Add runtime file writer:
 
-  * [ ] Writes JSON atomically (`.tmp` then rename).
-  * [ ] Contains baseUrl/port/listen/pid/version/stateDir/startTime.
-* [ ] Must write the file **after** Kestrel binds and the final port is known.
+  * [x] Writes JSON atomically (`.tmp` then rename).
+  * [x] Contains baseUrl/port/listen/pid/version/stateDir/startTime.
+* [x] Must write the file **after** Kestrel binds and the final port is known.
 
   * [ ] If using port `0`, resolve the actual port from server addresses.
 

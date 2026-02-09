@@ -78,41 +78,49 @@ public sealed class ExecCommand : AsyncCommand<ExecCommand.Settings>
             return 1;
         }
 
-        var isReview = settings.Prompt.Length > 0 &&
-                       string.Equals(settings.Prompt[0], "review", StringComparison.OrdinalIgnoreCase);
-
-        if (!isReview && UsesReviewOptions(settings))
+        try
         {
-            throw new ArgumentException("Review options are only valid with `codex-d http exec review ...`.");
+            var isReview = settings.Prompt.Length > 0 &&
+                           string.Equals(settings.Prompt[0], "review", StringComparison.OrdinalIgnoreCase);
+
+            if (!isReview && UsesReviewOptions(settings))
+            {
+                throw new ArgumentException("Review options are only valid with `codex-d http exec review ...`.");
+            }
+
+            var prompt = isReview ? ResolveReviewPrompt(settings) : ResolvePrompt(settings);
+
+            using var client = new RunnerClient(resolved.BaseUrl, resolved.Token);
+
+            var request = isReview
+                ? CreateReviewRequest(settings, resolved.Cwd, prompt)
+                : CreateExecRequest(settings, resolved.Cwd, prompt);
+
+            var created = await client.CreateRunAsync(request, cancellationToken);
+            var runId = created.RunId;
+            var status = created.Status;
+
+            if (settings.Json)
+            {
+                WriteJsonLine(new { eventName = "run.created", runId, status });
+            }
+            else
+            {
+                AnsiConsole.MarkupLine($"RunId: [cyan]{runId:D}[/]  Status: [grey]{status}[/]");
+            }
+
+            if (settings.Detach)
+            {
+                return 0;
+            }
+
+            return await StreamAsync(client, runId, replay: true, follow: true, tail: null, json: settings.Json, cancellationToken);
         }
-
-        var prompt = isReview ? ResolveReviewPrompt(settings) : ResolvePrompt(settings);
-
-        using var client = new RunnerClient(resolved.BaseUrl, resolved.Token);
-
-        var request = isReview
-            ? CreateReviewRequest(settings, resolved.Cwd, prompt)
-            : CreateExecRequest(settings, resolved.Cwd, prompt);
-
-        var created = await client.CreateRunAsync(request, cancellationToken);
-        var runId = created.RunId;
-        var status = created.Status;
-
-        if (settings.Json)
+        catch (ArgumentException ex)
         {
-            WriteJsonLine(new { eventName = "run.created", runId, status });
+            Console.Error.WriteLine(ex.Message);
+            return 1;
         }
-        else
-        {
-            AnsiConsole.MarkupLine($"RunId: [cyan]{runId:D}[/]  Status: [grey]{status}[/]");
-        }
-
-        if (settings.Detach)
-        {
-            return 0;
-        }
-
-        return await StreamAsync(client, runId, replay: true, follow: true, tail: null, json: settings.Json, cancellationToken);
     }
 
     private static CreateRunRequest CreateExecRequest(Settings settings, string cwd, string prompt) =>

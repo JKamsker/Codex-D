@@ -5,15 +5,14 @@ namespace CodexD.HttpRunner.Daemon;
 
 public static class DaemonSelfInstaller
 {
-    public static async Task InstallSelfIfNeededAsync(string daemonBinDir, CancellationToken ct)
+    public static async Task InstallSelfAsync(string daemonBinDir, string desiredVersion, bool force, CancellationToken ct)
     {
         Directory.CreateDirectory(daemonBinDir);
 
-        var version = typeof(DaemonSelfInstaller).Assembly.GetName().Version?.ToString() ?? "0.0.0";
         var markerPath = Path.Combine(daemonBinDir, ".version");
 
         var currentMarker = TryReadMarker(markerPath);
-        if (string.Equals(currentMarker, version, StringComparison.Ordinal))
+        if (!force && string.Equals(currentMarker, desiredVersion, StringComparison.Ordinal))
         {
             return;
         }
@@ -21,7 +20,7 @@ public static class DaemonSelfInstaller
         var sourceDir = AppContext.BaseDirectory;
         CopyDirectoryContents(sourceDir, daemonBinDir);
 
-        await File.WriteAllTextAsync(markerPath, version, ct);
+        await File.WriteAllTextAsync(markerPath, desiredVersion, ct);
     }
 
     public static ProcessStartInfo CreateInstalledStartInfo(string daemonBinDir, IReadOnlyList<string> args)

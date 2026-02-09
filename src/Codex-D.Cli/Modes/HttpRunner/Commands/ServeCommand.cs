@@ -163,7 +163,8 @@ public sealed class ServeCommand : AsyncCommand<ServeCommand.Settings>
         }
 
         var daemonBinDir = StatePaths.GetDaemonBinDir();
-        await DaemonSelfInstaller.InstallSelfIfNeededAsync(daemonBinDir, cancellationToken);
+        var desiredVersion = typeof(ServeCommand).Assembly.GetName().Version?.ToString() ?? "0.0.0";
+        await DaemonSelfInstaller.InstallSelfAsync(daemonBinDir, desiredVersion, force: false, cancellationToken);
 
         var psi = DaemonSelfInstaller.CreateInstalledStartInfo(daemonBinDir, args);
         psi.CreateNoWindow = true;

@@ -1,4 +1,5 @@
 using Spectre.Console.Cli;
+using CodexD.HttpRunner.Commands.Runs;
 
 namespace CodexD.HttpRunner.Commands;
 
@@ -10,6 +11,17 @@ public static class Entrypoint
         app.Configure(config =>
         {
             config.SetApplicationName("codex-d http");
+
+            config.AddBranch("runs", runs =>
+            {
+                runs.SetDescription("Inspect local run logs (events.jsonl) from a state directory.");
+
+                runs.AddCommand<ThinkingSummariesCommand>("thinking")
+                    .WithDescription("Print one-line summaries from thinking blocks (bold **...** headings).");
+
+                runs.AddCommand<MessagesCommand>("messages")
+                    .WithDescription("Print the last completed agent message(s) from a run.");
+            });
 
             config.AddCommand<ServeCommand>("serve")
                 .WithDescription("Start the HTTP/SSE runner.");

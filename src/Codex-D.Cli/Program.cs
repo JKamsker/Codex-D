@@ -2,6 +2,7 @@ using CodexD.HttpRunner.Commands;
 using Spectre.Console;
 using Spectre.Console.Cli;
 using CloudServeCommand = CodexD.CloudRunner.Cli.ServeCommand;
+using CodexD.HttpRunner.Commands.Runs;
 
 var app = new CommandApp();
 app.Configure(config =>
@@ -11,6 +12,17 @@ app.Configure(config =>
     config.AddBranch("http", http =>
     {
         http.SetDescription("Standalone HTTP + SSE runner.");
+
+        http.AddBranch("runs", runs =>
+        {
+            runs.SetDescription("Inspect local run logs (events.jsonl) from a state directory.");
+
+            runs.AddCommand<ThinkingSummariesCommand>("thinking")
+                .WithDescription("Print one-line summaries from thinking blocks (bold **...** headings).");
+
+            runs.AddCommand<MessagesCommand>("messages")
+                .WithDescription("Print the last completed agent message(s) from a run.");
+        });
 
         http.AddCommand<ServeCommand>("serve")
             .WithDescription("Start the HTTP/SSE runner.");

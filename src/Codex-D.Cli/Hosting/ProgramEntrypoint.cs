@@ -12,7 +12,7 @@ public static class ProgramEntrypoint
         var app = new CommandApp();
         app.Configure(config =>
         {
-            config.SetApplicationName("codex-runner");
+            config.SetApplicationName("codex-d");
 
             config.AddBranch("http", http =>
             {
@@ -46,7 +46,7 @@ public static class ProgramEntrypoint
         if (args.Length == 0)
         {
             AnsiConsole.MarkupLine("[red]Missing mode.[/]");
-            AnsiConsole.MarkupLine("Use: [grey]codex-runner http --help[/] or [grey]codex-runner cloud --help[/]");
+            AnsiConsole.MarkupLine("Use: [grey]codex-d http --help[/] or [grey]codex-d cloud --help[/]");
             AnsiConsole.WriteLine();
             await app.RunAsync(["--help"]);
             return 2;
@@ -65,7 +65,7 @@ public static class ProgramEntrypoint
             args[1].StartsWith("--", StringComparison.Ordinal))
         {
             AnsiConsole.MarkupLine("[red]Missing subcommand.[/]");
-            AnsiConsole.MarkupLine($"Use: [grey]codex-runner {args[0]} <command> ...[/]");
+            AnsiConsole.MarkupLine($"Use: [grey]codex-d {args[0]} <command> ...[/]");
             AnsiConsole.WriteLine();
             await app.RunAsync([args[0], "--help"]);
             return 2;

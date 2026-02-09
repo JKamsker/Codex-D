@@ -74,7 +74,7 @@ public sealed class ExecCommand : AsyncCommand<ExecCommand.Settings>
 
         if (!isReview && UsesReviewOptions(settings))
         {
-            throw new ArgumentException("Review options are only valid with `codex-runner http exec review ...`.");
+            throw new ArgumentException("Review options are only valid with `codex-d http exec review ...`.");
         }
 
         var prompt = isReview ? ResolveReviewPrompt(settings) : ResolvePrompt(settings);
@@ -160,7 +160,7 @@ public sealed class ExecCommand : AsyncCommand<ExecCommand.Settings>
 
     private static string ResolveReviewPrompt(Settings settings)
     {
-        // Syntax: `codex-runner http exec review [PROMPT...]`
+        // Syntax: `codex-d http exec review [PROMPT...]`
         var prompt = settings.PromptOption;
         if (string.IsNullOrWhiteSpace(prompt) && settings.Prompt.Length > 1)
         {

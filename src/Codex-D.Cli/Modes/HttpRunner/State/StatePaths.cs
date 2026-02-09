@@ -12,13 +12,13 @@ public static class StatePaths
                 baseDir = AppContext.BaseDirectory;
             }
 
-            return Path.Combine(baseDir, "codex-runner");
+            return Path.Combine(baseDir, "codex-d");
         }
 
         var xdgStateHome = Environment.GetEnvironmentVariable("XDG_STATE_HOME");
         if (!string.IsNullOrWhiteSpace(xdgStateHome))
         {
-            return Path.Combine(xdgStateHome, "codex-runner");
+            return Path.Combine(xdgStateHome, "codex-d");
         }
 
         var home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
@@ -27,7 +27,7 @@ public static class StatePaths
             home = AppContext.BaseDirectory;
         }
 
-        return Path.Combine(home, ".local", "state", "codex-runner");
+        return Path.Combine(home, ".local", "state", "codex-d");
     }
 
     public static string IdentityFile(string stateDirectory) =>

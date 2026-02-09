@@ -9,7 +9,7 @@ public static class Entrypoint
         var app = new CommandApp();
         app.Configure(config =>
         {
-            config.SetApplicationName("codex-runner http");
+            config.SetApplicationName("codex-d http");
 
             config.AddCommand<ServeCommand>("serve")
                 .WithDescription("Start the HTTP/SSE runner.");

@@ -36,7 +36,7 @@ internal sealed class RunnerHttpTestHost : IAsyncDisposable
         IRunExecutor executor,
         CancellationToken ct = default)
     {
-        var stateDir = Path.Combine(Path.GetTempPath(), "codex-runner-tests", Guid.NewGuid().ToString("N"));
+        var stateDir = Path.Combine(Path.GetTempPath(), "codex-d-tests", Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(stateDir);
 
         var port = GetFreeTcpPort();

@@ -83,7 +83,7 @@ public sealed class ServeCommand : AsyncCommand<ServeCommand.Settings>
 
     private static void PrintBanner(ServerConfig config, bool isLoopback)
     {
-        AnsiConsole.Write(new Rule("[bold]codex-runner http serve[/]").LeftJustified());
+        AnsiConsole.Write(new Rule("[bold]codex-d http serve[/]").LeftJustified());
         AnsiConsole.MarkupLine($"Base URL: [cyan]{config.BaseUrl}[/]");
         AnsiConsole.MarkupLine($"RunnerId: [cyan]{config.Identity.RunnerId}[/]");
         AnsiConsole.MarkupLine($"StateDir: [grey]{config.StateDirectory}[/]");
@@ -105,7 +105,7 @@ public sealed class ServeCommand : AsyncCommand<ServeCommand.Settings>
         }
 
         AnsiConsole.WriteLine();
-        AnsiConsole.MarkupLine($"Try: [grey]codex-runner http exec --url {config.BaseUrl} --cd \"{Directory.GetCurrentDirectory()}\" \"Hello\"[/]");
+        AnsiConsole.MarkupLine($"Try: [grey]codex-d http exec --url {config.BaseUrl} --cd \"{Directory.GetCurrentDirectory()}\" \"Hello\"[/]");
         if (config.RequireAuth)
         {
             AnsiConsole.MarkupLine($"     [grey]... --token {config.Identity.Token}[/]");

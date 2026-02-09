@@ -65,8 +65,8 @@ public static class Host
             builder.Services.AddCodexAppServerClient(options =>
             {
                 options.DefaultClientInfo = new AppServerClientInfo(
-                    name: "codex-runner-http",
-                    title: "Codex Runner (HTTP)",
+                    name: "codex-d-http",
+                    title: "CodexD (HTTP)",
                     version: typeof(Host).Assembly.GetName().Version?.ToString() ?? "0.0.0");
 
                 options.ApprovalHandler = new AlwaysDenyHandler();

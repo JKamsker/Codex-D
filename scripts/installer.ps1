@@ -131,7 +131,22 @@ New-Item -ItemType Directory -Path $configDir -Force | Out-Null
 try {
   Remove-PreviousWrappers
 
-  Invoke-WebRequest -Uri $downloadUrl -OutFile $zipPath -UseBasicParsing
+  $prevProgressPreference = $ProgressPreference
+  $prevProgressView = $null
+  try {
+    $ProgressPreference = 'SilentlyContinue'
+    if (Get-Variable -Name PSStyle -Scope Global -ErrorAction SilentlyContinue) {
+      $prevProgressView = $PSStyle.Progress.View
+      $PSStyle.Progress.View = 'Minimal'
+    }
+
+    Invoke-WebRequest -Uri $downloadUrl -OutFile $zipPath -UseBasicParsing
+  } finally {
+    $ProgressPreference = $prevProgressPreference
+    if ($null -ne $prevProgressView) {
+      $PSStyle.Progress.View = $prevProgressView
+    }
+  }
   Expand-Archive -LiteralPath $zipPath -DestinationPath $extractDir -Force
 
   $exe = Join-Path $extractDir 'codex-d.exe'

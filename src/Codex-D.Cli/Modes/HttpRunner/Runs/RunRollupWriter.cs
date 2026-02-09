@@ -64,28 +64,30 @@ public sealed class RunRollupWriter
 
     private async Task OnCommandExecutionOutputDeltaAsync(Guid runId, DateTimeOffset createdAt, string delta, CancellationToken ct)
     {
-        if (string.IsNullOrWhiteSpace(delta))
+        if (delta.Length == 0)
         {
             return;
         }
 
-        var trimmed = delta.Trim();
-        if (string.Equals(trimmed, "thinking", StringComparison.OrdinalIgnoreCase) ||
-            string.Equals(trimmed, "final", StringComparison.OrdinalIgnoreCase))
+        if (!ContainsNewline(delta))
         {
-            await _store.AppendRollupRecordAsync(
-                runId,
-                new RunRollupRecord
-                {
-                    Type = "outputLine",
-                    CreatedAt = createdAt,
-                    Source = "commandExecution",
-                    Text = trimmed,
-                    EndsWithNewline = false,
-                    IsControl = true
-                },
-                ct);
-            return;
+            var trimmed = delta.Trim();
+            if (IsControlMarker(trimmed))
+            {
+                await _store.AppendRollupRecordAsync(
+                    runId,
+                    new RunRollupRecord
+                    {
+                        Type = "outputLine",
+                        CreatedAt = createdAt,
+                        Source = "commandExecution",
+                        Text = trimmed,
+                        EndsWithNewline = false,
+                        IsControl = true
+                    },
+                    ct);
+                return;
+            }
         }
 
         var state = _states.GetOrAdd(runId, _ => new RollupState());
@@ -93,9 +95,47 @@ public sealed class RunRollupWriter
         await state.Gate.WaitAsync(ct);
         try
         {
-            foreach (var record in ConsumeDeltaIntoLineRecords(createdAt, state.Buffer, delta))
+            var startIndex = 0;
+            if (state.PendingCr)
             {
-                await _store.AppendRollupRecordAsync(runId, record, ct);
+                if (delta[0] == '\n')
+                {
+                    startIndex = 1;
+                }
+
+                state.PendingCr = false;
+            }
+
+            for (var i = startIndex; i < delta.Length; i++)
+            {
+                var ch = delta[i];
+
+                if (ch == '\r')
+                {
+                    if (i + 1 < delta.Length && delta[i + 1] == '\n')
+                    {
+                        i++;
+                    }
+                    else if (i == delta.Length - 1)
+                    {
+                        state.PendingCr = true;
+                    }
+
+                    var record = BuildLineRecord(createdAt, state.Buffer, endsWithNewline: true);
+                    await _store.AppendRollupRecordAsync(runId, record, ct);
+                    state.Buffer.Clear();
+                    continue;
+                }
+
+                if (ch == '\n')
+                {
+                    var record = BuildLineRecord(createdAt, state.Buffer, endsWithNewline: true);
+                    await _store.AppendRollupRecordAsync(runId, record, ct);
+                    state.Buffer.Clear();
+                    continue;
+                }
+
+                state.Buffer.Append(ch);
             }
         }
         finally
@@ -104,49 +144,19 @@ public sealed class RunRollupWriter
         }
     }
 
-    private static IEnumerable<RunRollupRecord> ConsumeDeltaIntoLineRecords(
-        DateTimeOffset createdAt,
-        StringBuilder buffer,
-        string delta)
-    {
-        for (var i = 0; i < delta.Length; i++)
-        {
-            var ch = delta[i];
-
-            if (ch == '\r')
-            {
-                if (i + 1 < delta.Length && delta[i + 1] == '\n')
-                {
-                    i++;
-                }
-
-                yield return BuildLineRecord(createdAt, buffer, endsWithNewline: true);
-                buffer.Clear();
-                continue;
-            }
-
-            if (ch == '\n')
-            {
-                yield return BuildLineRecord(createdAt, buffer, endsWithNewline: true);
-                buffer.Clear();
-                continue;
-            }
-
-            buffer.Append(ch);
-        }
-    }
-
     private static RunRollupRecord BuildLineRecord(DateTimeOffset createdAt, StringBuilder buffer, bool endsWithNewline)
     {
         var text = buffer.ToString();
+        var trimmed = text.Trim();
+        var isControl = IsControlMarker(trimmed);
         return new RunRollupRecord
         {
             Type = "outputLine",
             CreatedAt = createdAt,
             Source = "commandExecution",
-            Text = text,
+            Text = isControl ? trimmed : text,
             EndsWithNewline = endsWithNewline,
-            IsControl = false
+            IsControl = isControl
         };
     }
 
@@ -164,6 +174,8 @@ public sealed class RunRollupWriter
             return;
         }
 
+        var trimmed = text.Trim();
+        var isControl = IsControlMarker(trimmed);
         await _store.AppendRollupRecordAsync(
             runId,
             new RunRollupRecord
@@ -171,18 +183,26 @@ public sealed class RunRollupWriter
                 Type = "outputLine",
                 CreatedAt = createdAt,
                 Source = "commandExecution",
-                Text = text,
+                Text = isControl ? trimmed : text,
                 EndsWithNewline = false,
-                IsControl = false
+                IsControl = isControl
             },
             ct);
 
         state.Buffer.Clear();
     }
 
+    private static bool ContainsNewline(string value)
+        => value.Contains('\n') || value.Contains('\r');
+
+    private static bool IsControlMarker(string value)
+        => string.Equals(value, "thinking", StringComparison.OrdinalIgnoreCase) ||
+           string.Equals(value, "final", StringComparison.OrdinalIgnoreCase);
+
     private sealed class RollupState
     {
         public SemaphoreSlim Gate { get; } = new(1, 1);
         public StringBuilder Buffer { get; } = new();
+        public bool PendingCr { get; set; }
     }
 }

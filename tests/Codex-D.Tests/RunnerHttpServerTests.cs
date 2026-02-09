@@ -232,6 +232,72 @@ public sealed class RunnerHttpServerTests
     }
 
     [Fact]
+    public async Task Rollup_DoesNotEmitEmptyLine_WhenCrLfIsSplitAcrossDeltaBoundaries()
+    {
+        await using var host = await RunnerHttpTestHost.StartAsync(requireAuth: false, new SplitCrLfAcrossDeltasExecutor());
+        using var sdk = host.CreateSdkClient(includeToken: false);
+
+        var cwd = Path.Combine(host.StateDir, "repo");
+        Directory.CreateDirectory(cwd);
+
+        var created = await sdk.CreateRunAsync(new CreateRunRequest { Cwd = cwd, Prompt = "hi", Model = null, Sandbox = null, ApprovalPolicy = "never" }, CancellationToken.None);
+        var runId = created.RunId;
+        await WaitForTerminalAsync(sdk, runId, TimeSpan.FromSeconds(2));
+
+        var store = host.App.Services.GetRequiredService<RunStore>();
+        var rollup = await store.ReadRollupAsync(runId, tail: null, CancellationToken.None);
+
+        var lines = rollup
+            .Where(r => r.Type == "outputLine" && r.IsControl != true)
+            .Select(r => r.Text)
+            .ToList();
+
+        Assert.Equal(["a", "b"], lines);
+    }
+
+    [Fact]
+    public async Task Rollup_TreatsNewlineOnlyDeltas_AsLineTerminators()
+    {
+        await using var host = await RunnerHttpTestHost.StartAsync(requireAuth: false, new NewlineOnlyDeltaExecutor());
+        using var sdk = host.CreateSdkClient(includeToken: false);
+
+        var cwd = Path.Combine(host.StateDir, "repo");
+        Directory.CreateDirectory(cwd);
+
+        var created = await sdk.CreateRunAsync(new CreateRunRequest { Cwd = cwd, Prompt = "hi", Model = null, Sandbox = null, ApprovalPolicy = "never" }, CancellationToken.None);
+        var runId = created.RunId;
+        await WaitForTerminalAsync(sdk, runId, TimeSpan.FromSeconds(2));
+
+        var store = host.App.Services.GetRequiredService<RunStore>();
+        var rollup = await store.ReadRollupAsync(runId, tail: null, CancellationToken.None);
+
+        var outputLines = rollup.Where(r => r.Type == "outputLine" && r.IsControl != true).ToList();
+        Assert.Single(outputLines);
+        Assert.Equal("hello", outputLines[0].Text);
+        Assert.True(outputLines[0].EndsWithNewline);
+    }
+
+    [Fact]
+    public async Task ThinkingSummaries_Works_WhenThinkingMarkersAreInTheSameDelta()
+    {
+        await using var host = await RunnerHttpTestHost.StartAsync(requireAuth: false, new InlineThinkingMarkersExecutor());
+        using var sdk = host.CreateSdkClient(includeToken: false);
+        using var http = host.CreateHttpClient(includeToken: false);
+
+        var cwd = Path.Combine(host.StateDir, "repo");
+        Directory.CreateDirectory(cwd);
+
+        var created = await sdk.CreateRunAsync(new CreateRunRequest { Cwd = cwd, Prompt = "hi", Model = null, Sandbox = null, ApprovalPolicy = "never" }, CancellationToken.None);
+        var runId = created.RunId;
+        await WaitForTerminalAsync(sdk, runId, TimeSpan.FromSeconds(2));
+
+        var json = await http.GetFromJsonAsync<JsonElement>($"/v1/runs/{runId:D}/thinking-summaries");
+        var items = json.GetProperty("items").EnumerateArray().Select(x => x.GetString()).Where(x => x is not null).ToList();
+
+        Assert.Contains("Phase 1", items);
+    }
+
+    [Fact]
     public async Task Rollup_PersistsThinkingAndFinalMarkers_AsControlOutputLines()
     {
         await using var host = await RunnerHttpTestHost.StartAsync(requireAuth: false, new MessagesAndThinkingExecutor());
@@ -318,6 +384,76 @@ public sealed class RunnerHttpServerTests
         Assert.Contains(seen, e => e.Name == "codex.rollup.outputLine");
         Assert.Contains(seen, e => e.Name == "codex.notification");
         Assert.Contains(seen, e => e.Name == "run.completed");
+    }
+
+    [Fact]
+    public async Task Sse_RawReplay_DoesNotDropEventsWithSameCreatedAtAsReplayMax()
+    {
+        var exec = new CoordinatedExecutor();
+        await using var host = await RunnerHttpTestHost.StartAsync(requireAuth: false, exec, persistRawEvents: true);
+        using var sdk = host.CreateSdkClient(includeToken: false);
+
+        var cwd = Path.Combine(host.StateDir, "repo");
+        Directory.CreateDirectory(cwd);
+
+        var created = await sdk.CreateRunAsync(new CreateRunRequest { Cwd = cwd, Prompt = "hi", Model = null, Sandbox = null, ApprovalPolicy = "never" }, CancellationToken.None);
+        var runId = created.RunId;
+
+        await exec.FirstPublished.Task; // ensure early event persisted before attaching
+
+        var store = host.App.Services.GetRequiredService<RunStore>();
+        var raw = await store.ReadRawEventsAsync(runId, tail: null, CancellationToken.None);
+        var replayMax = raw.Where(e => e.Type == "codex.notification").Max(e => e.CreatedAt);
+
+        var broadcaster = host.App.Services.GetRequiredService<RunEventBroadcaster>();
+        var injected = new RunEventEnvelope
+        {
+            Type = "codex.notification",
+            CreatedAt = replayMax,
+            Data = JsonSerializer.SerializeToElement(new
+            {
+                method = "item/commandExecution/outputDelta",
+                @params = new { delta = "injected\n" }
+            })
+        };
+
+        var sawReplay = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var sawInjected = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var seen = new List<SseEvent>();
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+
+        var consumeTask = Task.Run(async () =>
+        {
+            await foreach (var e in sdk.GetEventsAsync(runId, replay: true, follow: true, tail: null, replayFormat: "auto", cts.Token))
+            {
+                seen.Add(e);
+                if (e.Name == "codex.notification" && e.Data.Contains("early", StringComparison.Ordinal))
+                {
+                    sawReplay.TrySetResult();
+                }
+                if (e.Name == "codex.notification" && e.Data.Contains("injected", StringComparison.Ordinal))
+                {
+                    sawInjected.TrySetResult();
+                }
+                if (e.Name == "run.completed")
+                {
+                    break;
+                }
+            }
+        }, cts.Token);
+
+        await Task.WhenAny(sawReplay.Task, Task.Delay(TimeSpan.FromSeconds(2), cts.Token));
+        Assert.True(sawReplay.Task.IsCompleted);
+
+        broadcaster.Publish(runId, injected);
+
+        await Task.WhenAny(sawInjected.Task, Task.Delay(TimeSpan.FromSeconds(2), cts.Token));
+        Assert.True(sawInjected.Task.IsCompleted);
+
+        exec.AllowContinue.TrySetResult();
+        await consumeTask;
+
+        Assert.Contains(seen, e => e.Name == "codex.notification" && e.Data.Contains("injected", StringComparison.Ordinal));
     }
 
     [Fact]

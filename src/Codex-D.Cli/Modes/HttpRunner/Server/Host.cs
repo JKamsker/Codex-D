@@ -610,7 +610,7 @@ public static class Host
                             continue;
                         }
 
-                        if (useRawReplay && maxReplayedAt is not null && env.CreatedAt <= maxReplayedAt.Value)
+                        if (useRawReplay && maxReplayedAt is not null && env.CreatedAt < maxReplayedAt.Value)
                         {
                             continue;
                         }

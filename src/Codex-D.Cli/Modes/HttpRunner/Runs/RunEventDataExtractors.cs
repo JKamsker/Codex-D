@@ -25,7 +25,7 @@ internal static class RunEventDataExtractors
         }
 
         delta = deltaEl.GetString();
-        return !string.IsNullOrWhiteSpace(delta);
+        return delta is not null;
     }
 
     public static bool TryGetCompletedAgentMessageText(JsonElement data, out string? text)
@@ -79,4 +79,3 @@ internal static class RunEventDataExtractors
         return !string.IsNullOrWhiteSpace(method);
     }
 }
-

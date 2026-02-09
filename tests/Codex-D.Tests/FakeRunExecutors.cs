@@ -133,3 +133,61 @@ internal sealed class PlanOnlyExecutor : IRunExecutor
         return new RunExecutionResult { Status = RunStatuses.Succeeded, Error = null };
     }
 }
+
+internal sealed class SplitCrLfAcrossDeltasExecutor : IRunExecutor
+{
+    public async Task<RunExecutionResult> ExecuteAsync(RunExecutionContext context, CancellationToken ct)
+    {
+        context.SetInterrupt(_ => Task.CompletedTask);
+        await context.SetCodexIdsAsync("thread-test", "turn-test", ct);
+
+        await context.PublishNotificationAsync(
+            "item/commandExecution/outputDelta",
+            JsonSerializer.SerializeToElement(new { delta = "a\r" }),
+            ct);
+
+        await context.PublishNotificationAsync(
+            "item/commandExecution/outputDelta",
+            JsonSerializer.SerializeToElement(new { delta = "\nb\r\n" }),
+            ct);
+
+        return new RunExecutionResult { Status = RunStatuses.Succeeded, Error = null };
+    }
+}
+
+internal sealed class NewlineOnlyDeltaExecutor : IRunExecutor
+{
+    public async Task<RunExecutionResult> ExecuteAsync(RunExecutionContext context, CancellationToken ct)
+    {
+        context.SetInterrupt(_ => Task.CompletedTask);
+        await context.SetCodexIdsAsync("thread-test", "turn-test", ct);
+
+        await context.PublishNotificationAsync(
+            "item/commandExecution/outputDelta",
+            JsonSerializer.SerializeToElement(new { delta = "hello" }),
+            ct);
+
+        await context.PublishNotificationAsync(
+            "item/commandExecution/outputDelta",
+            JsonSerializer.SerializeToElement(new { delta = "\n" }),
+            ct);
+
+        return new RunExecutionResult { Status = RunStatuses.Succeeded, Error = null };
+    }
+}
+
+internal sealed class InlineThinkingMarkersExecutor : IRunExecutor
+{
+    public async Task<RunExecutionResult> ExecuteAsync(RunExecutionContext context, CancellationToken ct)
+    {
+        context.SetInterrupt(_ => Task.CompletedTask);
+        await context.SetCodexIdsAsync("thread-test", "turn-test", ct);
+
+        await context.PublishNotificationAsync(
+            "item/commandExecution/outputDelta",
+            JsonSerializer.SerializeToElement(new { delta = "thinking\n**Phase 1**\nfinal\n" }),
+            ct);
+
+        return new RunExecutionResult { Status = RunStatuses.Succeeded, Error = null };
+    }
+}

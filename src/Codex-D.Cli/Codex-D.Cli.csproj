@@ -10,6 +10,7 @@
 
     <PackAsTool>true</PackAsTool>
     <ToolCommandName>codex-d</ToolCommandName>
+    <PackageId>CodexD</PackageId>
     <Description>Standalone HTTP + SSE runner you can talk to from other terminals/machines.</Description>
   </PropertyGroup>
 

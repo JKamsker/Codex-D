@@ -12,6 +12,12 @@ Examples below assume a `codex-d` shim/binary is available; with `dotnet run`, i
 
 ---
 
+## Install (global tool)
+
+```bash
+dotnet tool install -g CodexD
+```
+
 ## HTTP mode
 
 ### Start the server

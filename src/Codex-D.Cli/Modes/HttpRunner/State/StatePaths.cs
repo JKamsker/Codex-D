@@ -30,6 +30,25 @@ public static class StatePaths
     public static string GetDaemonStateDir() =>
         Path.Combine(GetDaemonBaseDir(), "config");
 
+    public static string GetDefaultDaemonStateDir(bool isDev) =>
+        isDev ? GetDaemonDevStateDir() : GetDaemonStateDir();
+
+    public static string GetDaemonBinDirForStateDir(string daemonStateDir)
+    {
+        var full = Path.GetFullPath(daemonStateDir);
+        var leaf = Path.GetFileName(full.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar));
+        if (string.Equals(leaf, "config", StringComparison.OrdinalIgnoreCase))
+        {
+            var parent = Path.GetDirectoryName(full);
+            if (!string.IsNullOrWhiteSpace(parent))
+            {
+                return Path.Combine(parent, "bin");
+            }
+        }
+
+        return Path.Combine(full, "bin");
+    }
+
     public static int GetDefaultForegroundPort(bool isDev) =>
         isDev ? DEFAULT_FOREGROUND_PORT_DEV : DEFAULT_FOREGROUND_PORT;
 

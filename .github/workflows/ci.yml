@@ -140,7 +140,7 @@ jobs:
             try {
               await github.rest.git.updateRef({ owner, repo, ref, sha, force: true });
             } catch (e) {
-              if (e.status === 404) {
+              if (e.status === 404 || e.status === 422) {
                 await github.rest.git.createRef({ owner, repo, ref: 'refs/tags/nightly', sha });
               } else {
                 throw e;

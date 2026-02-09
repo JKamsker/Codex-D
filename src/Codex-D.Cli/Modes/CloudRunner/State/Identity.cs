@@ -1,4 +1,4 @@
-namespace CodexWebUi.Runner.CloudRunner.State;
+namespace CodexD.CloudRunner.State;
 
 public sealed record class Identity
 {

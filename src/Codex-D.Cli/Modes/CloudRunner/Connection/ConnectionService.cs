@@ -1,14 +1,14 @@
 using System.Runtime.InteropServices;
 using System.Text.Json;
-using CodexWebUi.Runner.CloudRunner.Commands;
-using CodexWebUi.Runner.CloudRunner.Configuration;
-using CodexWebUi.Runner.CloudRunner.Contracts;
-using CodexWebUi.Runner.CloudRunner.State;
+using CodexD.CloudRunner.Commands;
+using CodexD.CloudRunner.Configuration;
+using CodexD.CloudRunner.Contracts;
+using CodexD.CloudRunner.State;
 using Microsoft.AspNetCore.SignalR.Client;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 
-namespace CodexWebUi.Runner.CloudRunner.Connection;
+namespace CodexD.CloudRunner.Connection;
 
 public sealed class ConnectionService : BackgroundService
 {

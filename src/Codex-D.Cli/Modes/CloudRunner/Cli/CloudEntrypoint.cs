@@ -1,7 +1,7 @@
 using Spectre.Console;
 using Spectre.Console.Cli;
 
-namespace CodexWebUi.Runner.CloudRunner.Cli;
+namespace CodexD.CloudRunner.Cli;
 
 public static class CloudEntrypoint
 {

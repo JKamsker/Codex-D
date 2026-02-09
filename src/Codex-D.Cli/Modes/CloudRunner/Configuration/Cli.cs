@@ -1,6 +1,6 @@
 using System.Globalization;
 
-namespace CodexWebUi.Runner.CloudRunner.Configuration;
+namespace CodexD.CloudRunner.Configuration;
 
 public static class Cli
 {
@@ -172,7 +172,7 @@ public static class Cli
             baseDir = AppContext.BaseDirectory;
         }
 
-        return Path.Combine(baseDir, "CodexWebUi.Runner", "identity.json");
+        return Path.Combine(baseDir, "Codex-D", "identity.json");
     }
 }
 

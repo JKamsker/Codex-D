@@ -1,8 +1,8 @@
-using CodexWebUi.Runner.HttpRunner.Client;
-using CodexWebUi.Runner.Shared.Paths;
+using CodexD.HttpRunner.Client;
+using CodexD.Shared.Paths;
 using Xunit;
 
-namespace CodexWebUi.Runner.Tests;
+namespace CodexD.Tests;
 
 public sealed class ClientSettingsBaseTests
 {

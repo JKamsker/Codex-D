@@ -1,4 +1,4 @@
-namespace CodexWebUi.Runner.CloudRunner.Contracts.Workspace;
+namespace CodexD.CloudRunner.Contracts.Workspace;
 
 public sealed record class ValidatePathRequest
 {

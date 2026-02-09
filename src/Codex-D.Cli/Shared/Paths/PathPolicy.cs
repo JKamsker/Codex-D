@@ -1,4 +1,4 @@
-namespace CodexWebUi.Runner.Shared.Paths;
+namespace CodexD.Shared.Paths;
 
 public static class PathPolicy
 {

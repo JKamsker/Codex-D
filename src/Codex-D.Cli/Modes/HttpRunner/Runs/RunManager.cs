@@ -1,11 +1,11 @@
 using System.Collections.Concurrent;
 using System.Text.Json;
-using CodexWebUi.Runner.HttpRunner.Contracts;
-using CodexWebUi.Runner.Shared.Paths;
+using CodexD.HttpRunner.Contracts;
+using CodexD.Shared.Paths;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 
-namespace CodexWebUi.Runner.HttpRunner.Runs;
+namespace CodexD.HttpRunner.Runs;
 
 public sealed class RunManager
 {

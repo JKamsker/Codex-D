@@ -1,11 +1,11 @@
 using System.Text;
 using System.Text.Json;
-using CodexWebUi.Runner.HttpRunner.Contracts;
+using CodexD.HttpRunner.Contracts;
 using JKToolKit.CodexSDK.Exec;
 using Microsoft.Extensions.Logging;
 using System.Threading.Channels;
 
-namespace CodexWebUi.Runner.HttpRunner.Runs;
+namespace CodexD.HttpRunner.Runs;
 
 public sealed class CodexReviewRunExecutor : IRunExecutor
 {

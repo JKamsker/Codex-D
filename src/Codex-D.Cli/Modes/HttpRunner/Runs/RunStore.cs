@@ -1,8 +1,8 @@
 using System.Text.Json;
-using CodexWebUi.Runner.HttpRunner.Contracts;
-using CodexWebUi.Runner.HttpRunner.State;
+using CodexD.HttpRunner.Contracts;
+using CodexD.HttpRunner.State;
 
-namespace CodexWebUi.Runner.HttpRunner.Runs;
+namespace CodexD.HttpRunner.Runs;
 
 public sealed class RunStore
 {

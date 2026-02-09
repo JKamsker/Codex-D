@@ -1,6 +1,6 @@
 using JKToolKit.CodexSDK.AppServer;
 
-namespace CodexWebUi.Runner.HttpRunner.CodexRuntime;
+namespace CodexD.HttpRunner.CodexRuntime;
 
 public interface IAppServerClientProvider
 {

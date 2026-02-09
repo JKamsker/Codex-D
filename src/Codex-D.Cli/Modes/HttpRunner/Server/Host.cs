@@ -1,9 +1,9 @@
 using System.Net;
 using System.Text.Json;
-using CodexWebUi.Runner.HttpRunner.CodexRuntime;
-using CodexWebUi.Runner.HttpRunner.Contracts;
-using CodexWebUi.Runner.Shared.Paths;
-using CodexWebUi.Runner.HttpRunner.Runs;
+using CodexD.HttpRunner.CodexRuntime;
+using CodexD.HttpRunner.Contracts;
+using CodexD.Shared.Paths;
+using CodexD.HttpRunner.Runs;
 using JKToolKit.CodexSDK.AppServer;
 using JKToolKit.CodexSDK.AppServer.ApprovalHandlers;
 using Microsoft.AspNetCore.Builder;
@@ -13,7 +13,7 @@ using Microsoft.AspNetCore.Http.Json;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 
-namespace CodexWebUi.Runner.HttpRunner.Server;
+namespace CodexD.HttpRunner.Server;
 
 public static class Host
 {

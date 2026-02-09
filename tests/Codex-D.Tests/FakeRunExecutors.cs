@@ -1,8 +1,8 @@
 using System.Text.Json;
-using CodexWebUi.Runner.HttpRunner.Contracts;
-using CodexWebUi.Runner.HttpRunner.Runs;
+using CodexD.HttpRunner.Contracts;
+using CodexD.HttpRunner.Runs;
 
-namespace CodexWebUi.Runner.Tests;
+namespace CodexD.Tests;
 
 internal sealed class ImmediateSuccessExecutor : IRunExecutor
 {

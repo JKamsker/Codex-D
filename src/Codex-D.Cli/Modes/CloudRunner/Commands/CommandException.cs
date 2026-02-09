@@ -1,4 +1,4 @@
-namespace CodexWebUi.Runner.CloudRunner.Commands;
+namespace CodexD.CloudRunner.Commands;
 
 public sealed class CommandException : Exception
 {

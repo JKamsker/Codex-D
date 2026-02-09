@@ -1,15 +1,15 @@
 using System.ComponentModel;
-using CodexWebUi.Runner.CloudRunner.Commands;
-using CodexWebUi.Runner.CloudRunner.Configuration;
-using CodexWebUi.Runner.CloudRunner.Connection;
-using CodexWebUi.Runner.CloudRunner.State;
+using CodexD.CloudRunner.Commands;
+using CodexD.CloudRunner.Configuration;
+using CodexD.CloudRunner.Connection;
+using CodexD.CloudRunner.State;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Spectre.Console;
 using Spectre.Console.Cli;
 
-namespace CodexWebUi.Runner.CloudRunner.Cli;
+namespace CodexD.CloudRunner.Cli;
 
 public sealed class ServeCommand : AsyncCommand<ServeCommand.Settings>
 {
@@ -214,7 +214,7 @@ public sealed class ServeCommand : AsyncCommand<ServeCommand.Settings>
             baseDir = AppContext.BaseDirectory;
         }
 
-        return Path.Combine(baseDir, "CodexWebUi.Runner", "identity.json");
+        return Path.Combine(baseDir, "Codex-D", "identity.json");
     }
 }
 

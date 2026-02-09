@@ -1,4 +1,4 @@
-namespace CodexWebUi.Runner.CloudRunner.Contracts.Fs;
+namespace CodexD.CloudRunner.Contracts.Fs;
 
 public sealed record class ListDirectoriesRequest
 {

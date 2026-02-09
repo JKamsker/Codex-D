@@ -1,8 +1,8 @@
 using System.ComponentModel;
-using CodexWebUi.Runner.Shared.Paths;
+using CodexD.Shared.Paths;
 using Spectre.Console.Cli;
 
-namespace CodexWebUi.Runner.HttpRunner.Client;
+namespace CodexD.HttpRunner.Client;
 
 public abstract class ClientSettingsBase : CommandSettings
 {

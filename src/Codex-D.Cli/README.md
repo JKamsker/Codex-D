@@ -1,4 +1,4 @@
-# CodexWebUi.Runner (`codex-runner`)
+# Codex-D.Cli (`codex-runner`)
 
 The runner has two modes:
 
@@ -8,7 +8,7 @@ The runner has two modes:
 If you’re running from source, prefix commands with:
 
 ```bash
-dotnet run --project src/CodexWebUi.Runner/CodexWebUi.Runner.csproj -- <args>
+dotnet run --project src/Codex-D.Cli/Codex-D.Cli.csproj -- <args>
 ```
 
 Examples below assume a `codex-runner` shim/binary is available; with `dotnet run`, insert the prefix above.

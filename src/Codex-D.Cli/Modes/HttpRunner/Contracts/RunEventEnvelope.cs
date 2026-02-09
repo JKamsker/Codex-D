@@ -1,6 +1,6 @@
 using System.Text.Json;
 
-namespace CodexWebUi.Runner.HttpRunner.Contracts;
+namespace CodexD.HttpRunner.Contracts;
 
 public sealed record class RunEventEnvelope
 {

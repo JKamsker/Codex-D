@@ -1,4 +1,4 @@
-namespace CodexWebUi.Runner.CloudRunner.Configuration;
+namespace CodexD.CloudRunner.Configuration;
 
 public sealed record class AppOptions
 {

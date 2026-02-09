@@ -1,12 +1,12 @@
 using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
-using CodexWebUi.Runner.HttpRunner.Client;
-using CodexWebUi.Runner.HttpRunner.Contracts;
-using CodexWebUi.Runner.Shared.Paths;
+using CodexD.HttpRunner.Client;
+using CodexD.HttpRunner.Contracts;
+using CodexD.Shared.Paths;
 using Xunit;
 
-namespace CodexWebUi.Runner.Tests;
+namespace CodexD.Tests;
 
 public sealed class RunnerHttpServerTests
 {

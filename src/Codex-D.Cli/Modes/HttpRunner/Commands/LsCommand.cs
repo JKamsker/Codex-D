@@ -1,8 +1,8 @@
-using CodexWebUi.Runner.HttpRunner.Client;
+using CodexD.HttpRunner.Client;
 using Spectre.Console;
 using Spectre.Console.Cli;
 
-namespace CodexWebUi.Runner.HttpRunner.Commands;
+namespace CodexD.HttpRunner.Commands;
 
 public sealed class LsCommand : AsyncCommand<LsCommand.Settings>
 {

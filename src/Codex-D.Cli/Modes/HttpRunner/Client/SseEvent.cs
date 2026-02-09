@@ -1,4 +1,4 @@
-namespace CodexWebUi.Runner.HttpRunner.Client;
+namespace CodexD.HttpRunner.Client;
 
 public sealed record class SseEvent
 {

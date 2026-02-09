@@ -1,13 +1,13 @@
 using System.Net;
 using System.Net.Http.Headers;
 using System.Net.Sockets;
-using CodexWebUi.Runner.HttpRunner.Client;
-using CodexWebUi.Runner.HttpRunner.Runs;
-using CodexWebUi.Runner.HttpRunner.Server;
-using CodexWebUi.Runner.HttpRunner.State;
+using CodexD.HttpRunner.Client;
+using CodexD.HttpRunner.Runs;
+using CodexD.HttpRunner.Server;
+using CodexD.HttpRunner.State;
 using Microsoft.Extensions.DependencyInjection;
 
-namespace CodexWebUi.Runner.Tests;
+namespace CodexD.Tests;
 
 internal sealed class RunnerHttpTestHost : IAsyncDisposable
 {

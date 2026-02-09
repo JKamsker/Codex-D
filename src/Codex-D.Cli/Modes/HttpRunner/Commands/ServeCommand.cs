@@ -1,11 +1,11 @@
 using System.ComponentModel;
 using System.Net;
-using CodexWebUi.Runner.HttpRunner.Server;
-using CodexWebUi.Runner.HttpRunner.State;
+using CodexD.HttpRunner.Server;
+using CodexD.HttpRunner.State;
 using Spectre.Console;
 using Spectre.Console.Cli;
 
-namespace CodexWebUi.Runner.HttpRunner.Commands;
+namespace CodexD.HttpRunner.Commands;
 
 public sealed class ServeCommand : AsyncCommand<ServeCommand.Settings>
 {

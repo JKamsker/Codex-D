@@ -1,9 +1,9 @@
 using System.Collections.Concurrent;
 using System.Text.Json;
-using CodexWebUi.Runner.CloudRunner.Configuration;
-using CodexWebUi.Runner.CloudRunner.Contracts;
+using CodexD.CloudRunner.Configuration;
+using CodexD.CloudRunner.Contracts;
 
-namespace CodexWebUi.Runner.CloudRunner.Commands;
+namespace CodexD.CloudRunner.Commands;
 
 public sealed class CommandRouter
 {

@@ -1,9 +1,9 @@
-using CodexWebUi.Runner.HttpRunner.Commands;
+using CodexD.HttpRunner.Commands;
 using Spectre.Console;
 using Spectre.Console.Cli;
-using CloudServeCommand = CodexWebUi.Runner.CloudRunner.Cli.ServeCommand;
+using CloudServeCommand = CodexD.CloudRunner.Cli.ServeCommand;
 
-namespace CodexWebUi.Runner;
+namespace CodexD;
 
 public static class ProgramEntrypoint
 {

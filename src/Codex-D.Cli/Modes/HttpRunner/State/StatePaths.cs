@@ -1,4 +1,4 @@
-namespace CodexWebUi.Runner.HttpRunner.State;
+namespace CodexD.HttpRunner.State;
 
 public static class StatePaths
 {

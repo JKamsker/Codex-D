@@ -1,6 +1,6 @@
 using System.Text.Json;
 
-namespace CodexWebUi.Runner.CloudRunner.Commands;
+namespace CodexD.CloudRunner.Commands;
 
 public interface ICommandHandler
 {

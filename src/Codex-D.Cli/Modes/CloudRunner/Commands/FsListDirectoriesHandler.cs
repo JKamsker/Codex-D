@@ -1,9 +1,9 @@
 using System.Text.Json;
-using CodexWebUi.Runner.CloudRunner.Configuration;
-using CodexWebUi.Runner.CloudRunner.Contracts.Fs;
-using CodexWebUi.Runner.Shared.Paths;
+using CodexD.CloudRunner.Configuration;
+using CodexD.CloudRunner.Contracts.Fs;
+using CodexD.Shared.Paths;
 
-namespace CodexWebUi.Runner.CloudRunner.Commands;
+namespace CodexD.CloudRunner.Commands;
 
 public sealed class FsListDirectoriesHandler : ICommandHandler
 {

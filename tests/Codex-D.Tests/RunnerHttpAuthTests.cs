@@ -1,8 +1,8 @@
-using CodexWebUi.Runner.HttpRunner.Server;
+using CodexD.HttpRunner.Server;
 using Microsoft.AspNetCore.Http;
 using Xunit;
 
-namespace CodexWebUi.Runner.Tests;
+namespace CodexD.Tests;
 
 public sealed class AuthTests
 {

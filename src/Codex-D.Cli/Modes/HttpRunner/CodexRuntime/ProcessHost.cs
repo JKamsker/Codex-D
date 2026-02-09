@@ -1,10 +1,10 @@
 using JKToolKit.CodexSDK.AppServer;
-using CodexWebUi.Runner.HttpRunner.Runs;
+using CodexD.HttpRunner.Runs;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
-namespace CodexWebUi.Runner.HttpRunner.CodexRuntime;
+namespace CodexD.HttpRunner.CodexRuntime;
 
 public sealed class ProcessHost : BackgroundService
 {

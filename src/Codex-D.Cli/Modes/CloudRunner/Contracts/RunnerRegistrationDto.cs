@@ -1,4 +1,4 @@
-namespace CodexWebUi.Runner.CloudRunner.Contracts;
+namespace CodexD.CloudRunner.Contracts;
 
 public sealed record class RunnerRegistrationDto
 {

@@ -1,7 +1,7 @@
 using System.Net;
-using CodexWebUi.Runner.HttpRunner.State;
+using CodexD.HttpRunner.State;
 
-namespace CodexWebUi.Runner.HttpRunner.Server;
+namespace CodexD.HttpRunner.Server;
 
 public sealed record class ServerConfig
 {

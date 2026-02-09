@@ -1,7 +1,7 @@
 using System.Security.Cryptography;
 using Microsoft.AspNetCore.Http;
 
-namespace CodexWebUi.Runner.HttpRunner.Server;
+namespace CodexD.HttpRunner.Server;
 
 public static class Auth
 {

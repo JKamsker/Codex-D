@@ -1,7 +1,7 @@
 using System.Text.Json;
-using CodexWebUi.Runner.CloudRunner.Configuration;
+using CodexD.CloudRunner.Configuration;
 
-namespace CodexWebUi.Runner.CloudRunner.State;
+namespace CodexD.CloudRunner.State;
 
 public sealed class IdentityStore
 {

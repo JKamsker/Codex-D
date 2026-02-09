@@ -1,6 +1,6 @@
-using CodexWebUi.Runner.HttpRunner.Contracts;
+using CodexD.HttpRunner.Contracts;
 
-namespace CodexWebUi.Runner.HttpRunner.Runs;
+namespace CodexD.HttpRunner.Runs;
 
 public sealed record class RunStoreCreateResult
 {

@@ -1,12 +1,12 @@
 using System.Text.Json;
-using CodexWebUi.Runner.HttpRunner.CodexRuntime;
-using CodexWebUi.Runner.HttpRunner.Contracts;
+using CodexD.HttpRunner.CodexRuntime;
+using CodexD.HttpRunner.Contracts;
 using JKToolKit.CodexSDK.AppServer;
 using JKToolKit.CodexSDK.AppServer.Notifications;
 using JKToolKit.CodexSDK.Models;
 using Microsoft.Extensions.Logging;
 
-namespace CodexWebUi.Runner.HttpRunner.Runs;
+namespace CodexD.HttpRunner.Runs;
 
 public sealed class CodexAppServerRunExecutor : IRunExecutor
 {

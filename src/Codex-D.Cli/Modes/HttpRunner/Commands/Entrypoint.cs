@@ -1,6 +1,6 @@
 using Spectre.Console.Cli;
 
-namespace CodexWebUi.Runner.HttpRunner.Commands;
+namespace CodexD.HttpRunner.Commands;
 
 public static class Entrypoint
 {

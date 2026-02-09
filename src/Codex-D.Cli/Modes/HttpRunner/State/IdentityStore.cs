@@ -1,7 +1,7 @@
 using System.Security.Cryptography;
 using System.Text.Json;
 
-namespace CodexWebUi.Runner.HttpRunner.State;
+namespace CodexD.HttpRunner.State;
 
 public sealed class IdentityStore
 {

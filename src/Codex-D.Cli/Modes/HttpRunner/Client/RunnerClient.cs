@@ -1,9 +1,9 @@
 using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Json;
-using CodexWebUi.Runner.HttpRunner.Contracts;
+using CodexD.HttpRunner.Contracts;
 
-namespace CodexWebUi.Runner.HttpRunner.Client;
+namespace CodexD.HttpRunner.Client;
 
 public sealed class RunnerClient : IDisposable
 {

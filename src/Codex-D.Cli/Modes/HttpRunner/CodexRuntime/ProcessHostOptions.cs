@@ -1,4 +1,4 @@
-namespace CodexWebUi.Runner.HttpRunner.CodexRuntime;
+namespace CodexD.HttpRunner.CodexRuntime;
 
 public sealed class ProcessHostOptions
 {

@@ -25,3 +25,6 @@
 # Local Docker Compose overrides
 docker-compose.override.yml
 docker-compose.override.yaml
+
+# Local CI-style output folder (e.g. dotnet pack -o out/)
+out/

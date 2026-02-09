@@ -70,12 +70,14 @@ Base directory (per-user):
 
 Proposed layout:
 
-* `%LOCALAPPDATA%\codex-d\bin\v<version>\...`
+* `%LOCALAPPDATA%\codex-d\daemon\bin\`
 
-  * Installed/copy-of-self binaries for detached running
-* `%LOCALAPPDATA%\codex-d\daemon\`
+  * Installed/copy-of-self binaries for detached running.
+  * Copied from `AppContext.BaseDirectory` **only when the running version differs** from the already-installed version (version mismatch check).
 
-  * **State directory for daemon server**:
+* `%LOCALAPPDATA%\codex-d\daemon\config\`
+
+  * **Config & state directory for daemon server**:
 
     * `identity.json` (token + runner id)
     * `runs\...` (runs store)
@@ -83,7 +85,7 @@ Proposed layout:
     * `daemon.lock` (optional; for start coordination later)
     * `daemon.log` (optional; redirect stdout/stderr)
 
-> **Note:** Keeping daemon runtime + state co-located avoids having to manage separate “config” vs “state” in v1.
+> **Note:** Keeping daemon runtime + state co-located under `config\` avoids having to manage separate directories in v1. Binaries live in a sibling `bin\` folder so they can be replaced independently on upgrade.
 
 ### Foreground (project-local)
 
@@ -139,7 +141,7 @@ Defaults:
 
 * `--listen 127.0.0.1`
 * `--port 0` (ephemeral)
-* `--state-dir %LOCALAPPDATA%\codex-d\daemon`
+* `--state-dir %LOCALAPPDATA%\codex-d\daemon\config`
 * **Auth required** (even on loopback; daemon is long-lived)
 
 Overrides:
@@ -166,7 +168,7 @@ Behavior (high level):
 
 ### File path
 
-* `%LOCALAPPDATA%\codex-d\daemon\daemon.runtime.json`
+* `%LOCALAPPDATA%\codex-d\daemon\config\daemon.runtime.json`
 
 ### Schema (v1)
 
@@ -179,14 +181,14 @@ Write JSON (atomic: write `.tmp` then rename):
   "port": 54321,
   "pid": 12345,
   "startedAtUtc": "2026-02-09T11:22:33.456Z",
-  "stateDir": "C:\\Users\\me\\AppData\\Local\\codex-d\\daemon",
+  "stateDir": "C:\\Users\\me\\AppData\\Local\\codex-d\\daemon\\config",
   "version": "1.2.3"
 }
 ```
 
 Notes:
 
-* Do **not** store the token here (token already lives in `identity.json` in the same dir).
+* Do **not** store the token here (token already lives in `identity.json` in the config dir).
 * `pid` is helpful later for stale-runtime detection, but not required to rely on in v1.
 * If daemon crashes and the runtime file is stale, client should treat it as “unavailable” after a failed health check.
 
@@ -292,8 +294,9 @@ Command-line flags always win over env vars.
   * [ ] `DEFAULT_FOREGROUND_STATE_DIR_NAME = ".codex-d"`
 * [ ] Add path helpers:
 
-  * [ ] `GetDaemonBaseDir()` → `%LOCALAPPDATA%\codex-d`
-  * [ ] `GetDaemonStateDir()` → `%LOCALAPPDATA%\codex-d\daemon`
+  * [ ] `GetDaemonBaseDir()` → `%LOCALAPPDATA%\codex-d\daemon`
+  * [ ] `GetDaemonBinDir()` → `%LOCALAPPDATA%\codex-d\daemon\bin`
+  * [ ] `GetDaemonStateDir()` → `%LOCALAPPDATA%\codex-d\daemon\config`
   * [ ] `GetForegroundStateDir(cwd)` → `<cwd>\.codex-d`
   * [ ] `GetDaemonRuntimeFilePath()` → `<daemonStateDir>\daemon.runtime.json`
 
@@ -317,25 +320,25 @@ Command-line flags always win over env vars.
 
   * [ ] `listen=127.0.0.1`
   * [ ] `port=0`
-  * [ ] `stateDir=%LOCALAPPDATA%\codex-d\daemon`
+  * [ ] `stateDir=%LOCALAPPDATA%\codex-d\daemon\config`
   * [ ] auth required
 * [ ] On non-Windows:
 
   * [ ] `http serve -d` prints “Windows-only” error and exits non-zero.
 
-### D) Copy/install-self to LocalAppData (Windows)
+### D) Copy/install-self to daemon bin dir (Windows)
 
-* [ ] Determine version folder:
-
-  * [ ] `%LOCALAPPDATA%\codex-d\bin\v<semver-or-assembly-version>\`
+* [ ] Target folder: `%LOCALAPPDATA%\codex-d\daemon\bin\`
 * [ ] Implement `InstallSelfIfNeeded()`:
 
-  * [ ] Copy required binaries from `AppContext.BaseDirectory` into version folder.
+  * [ ] Compare running assembly version with a version marker in the bin dir (e.g. `.version` file).
+  * [ ] **Only copy if versions differ** (mismatch check).
+  * [ ] Copy required binaries from `AppContext.BaseDirectory` into bin folder.
   * [ ] Ensure correct behavior for single-file and multi-file publishing:
 
     * [ ] If multi-file, copy entire directory contents.
-* [ ] Daemon child process should run from the installed folder (not from the original working folder).
-* [ ] (Optional v1) Keep last N versions; cleanup can be v2.
+  * [ ] Write/update the `.version` marker after a successful copy.
+* [ ] Daemon child process should run from the installed bin folder (not from the original working folder).
 
 ### E) Daemon runtime file write
 
@@ -357,7 +360,7 @@ Command-line flags always win over env vars.
   * [ ] Else print the required error message (start daemon).
 * [ ] Implement token fallback:
 
-  * [ ] If connecting to daemon and no token provided → load `<daemonStateDir>\identity.json`.
+  * [ ] If connecting to daemon and no token provided → load `<daemonConfigDir>\identity.json`.
   * [ ] If connecting to foreground and server responds 401 and no token provided → load `<cwd>\.codex-d\identity.json`.
 
 ### G) Documentation updates

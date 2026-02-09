@@ -405,30 +405,43 @@ public sealed class ServeCommand : AsyncCommand<ServeCommand.Settings>
     {
         if (pid > 0)
         {
+            Process? p = null;
             try
             {
-                using var p = Process.GetProcessById(pid);
-                try
-                {
-                    p.Kill(entireProcessTree: true);
-                }
-                catch
-                {
-                    // ignore
-                }
-
-                try
-                {
-                    await p.WaitForExitAsync(ct);
-                }
-                catch
-                {
-                    // ignore
-                }
+                p = Process.GetProcessById(pid);
             }
-            catch
+            catch (ArgumentException)
             {
-                // ignore
+                p = null; // already stopped
+            }
+
+            if (p is not null)
+            {
+                using (p)
+                {
+                    try
+                    {
+                        p.Kill(entireProcessTree: true);
+                    }
+                    catch (InvalidOperationException)
+                    {
+                        // already exited
+                    }
+                    catch (SystemException)
+                    {
+                        // ignore kill failures
+                    }
+
+                    try
+                    {
+                        using var timeoutCts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+                        await p.WaitForExitAsync(timeoutCts.Token);
+                    }
+                    catch (OperationCanceledException)
+                    {
+                        // ignore timeout
+                    }
+                }
             }
         }
 

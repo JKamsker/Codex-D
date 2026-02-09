@@ -58,8 +58,8 @@ public static class StatePaths
         return Path.Combine(fullCwd, DEFAULT_FOREGROUND_STATE_DIR_NAME);
     }
 
-    public static string GetDaemonRuntimeFilePath() =>
-        Path.Combine(GetDaemonStateDir(), "daemon.runtime.json");
+    public static string GetDaemonRuntimeFilePath(bool isDev) =>
+        Path.Combine(GetDefaultDaemonStateDir(isDev), "daemon.runtime.json");
 
     public static string IdentityFile(string stateDirectory) =>
         Path.Combine(stateDirectory, "identity.json");

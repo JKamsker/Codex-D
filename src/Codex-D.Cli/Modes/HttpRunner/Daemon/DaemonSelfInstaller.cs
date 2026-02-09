@@ -18,6 +18,11 @@ public static class DaemonSelfInstaller
         }
 
         var sourceDir = AppContext.BaseDirectory;
+        if (PathsEqual(sourceDir, daemonBinDir))
+        {
+            await File.WriteAllTextAsync(markerPath, desiredVersion, ct);
+            return false;
+        }
         try
         {
             CopyDirectoryContents(sourceDir, daemonBinDir);
@@ -127,5 +132,15 @@ public static class DaemonSelfInstaller
             Directory.CreateDirectory(Path.GetDirectoryName(dest)!);
             File.Copy(file, dest, overwrite: true);
         }
+    }
+
+    private static bool PathsEqual(string a, string b)
+    {
+        var fullA = Path.GetFullPath(a).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        var fullB = Path.GetFullPath(b).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        return string.Equals(
+            fullA,
+            fullB,
+            OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal);
     }
 }

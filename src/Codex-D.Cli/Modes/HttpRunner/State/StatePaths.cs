@@ -3,6 +3,7 @@ namespace CodexD.HttpRunner.State;
 public static class StatePaths
 {
     public const int DEFAULT_FOREGROUND_PORT = 8787;
+    public const int DEFAULT_FOREGROUND_PORT_DEV = 8788;
     public const int DEFAULT_DAEMON_PORT = 0;
     public const string DEFAULT_FOREGROUND_STATE_DIR_NAME = ".codex-d";
 
@@ -17,11 +18,20 @@ public static class StatePaths
         return Path.Combine(baseDir, "codex-d", "daemon");
     }
 
+    public static string GetDaemonDevStateDir()
+    {
+        var baseDir = GetLocalAppDataDirOrFallback();
+        return Path.Combine(baseDir, "codex-d", "daemon-dev");
+    }
+
     public static string GetDaemonBinDir() =>
         Path.Combine(GetDaemonBaseDir(), "bin");
 
     public static string GetDaemonStateDir() =>
         Path.Combine(GetDaemonBaseDir(), "config");
+
+    public static int GetDefaultForegroundPort(bool isDev) =>
+        isDev ? DEFAULT_FOREGROUND_PORT_DEV : DEFAULT_FOREGROUND_PORT;
 
     public static string GetForegroundStateDir(string cwd)
     {

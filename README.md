@@ -18,7 +18,7 @@ Examples below assume a `codex-d` shim/binary is available; with `dotnet run`, i
 irm https://raw.githubusercontent.com/JKamsker/Codex-D/refs/heads/master/scripts/installer.ps1 | iex
 ```
 
-Installs to `%LOCALAPPDATA%\codex-d\bin` and adds it to your **user PATH**.
+Installs the app to `%LOCALAPPDATA%\codex-d\app`, then places small launchers (`codex-d.cmd`, `codex-d.ps1`, `codex-d.sh`) into an existing bin directory already on your PATH (prefers `%USERPROFILE%\.local\bin` / `%USERPROFILE%\.cargo\bin`, otherwise tries package-manager bins like `%USERPROFILE%\.dotnet\tools`). If none are found, it falls back to `%LOCALAPPDATA%\codex-d\bin` and adds it to your **user PATH**.
 Open a new terminal and run `codex-d --help`.
 
 ## Install (global tool, requires .NET 10)

@@ -328,17 +328,17 @@ Command-line flags always win over env vars.
 
 ### D) Copy/install-self to daemon bin dir (Windows)
 
-* [ ] Target folder: `%LOCALAPPDATA%\codex-d\daemon\bin\`
-* [ ] Implement `InstallSelfIfNeeded()`:
+* [x] Target folder: `%LOCALAPPDATA%\codex-d\daemon\bin\`
+* [x] Implement `InstallSelfIfNeeded()`:
 
-  * [ ] Compare running assembly version with a version marker in the bin dir (e.g. `.version` file).
-  * [ ] **Only copy if versions differ** (mismatch check).
-  * [ ] Copy required binaries from `AppContext.BaseDirectory` into bin folder.
-  * [ ] Ensure correct behavior for single-file and multi-file publishing:
+  * [x] Compare running assembly version with a version marker in the bin dir (e.g. `.version` file).
+  * [x] **Only copy if versions differ** (mismatch check).
+  * [x] Copy required binaries from `AppContext.BaseDirectory` into bin folder.
+  * [x] Ensure correct behavior for single-file and multi-file publishing:
 
-    * [ ] If multi-file, copy entire directory contents.
-  * [ ] Write/update the `.version` marker after a successful copy.
-* [ ] Daemon child process should run from the installed bin folder (not from the original working folder).
+    * [x] If multi-file, copy entire directory contents.
+  * [x] Write/update the `.version` marker after a successful copy.
+* [x] Daemon child process should run from the installed bin folder (not from the original working folder).
 
 ### E) Daemon runtime file write
 

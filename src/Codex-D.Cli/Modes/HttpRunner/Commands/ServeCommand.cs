@@ -158,7 +158,10 @@ public sealed class ServeCommand : AsyncCommand<ServeCommand.Settings>
             args.Add(settings.Token.Trim());
         }
 
-        var psi = CreateSelfStartInfo(args, workingDirectory: AppContext.BaseDirectory);
+        var daemonBinDir = StatePaths.GetDaemonBinDir();
+        await DaemonSelfInstaller.InstallSelfIfNeededAsync(daemonBinDir, cancellationToken);
+
+        var psi = DaemonSelfInstaller.CreateInstalledStartInfo(daemonBinDir, args);
         psi.CreateNoWindow = true;
         psi.UseShellExecute = false;
 
@@ -294,52 +297,6 @@ public sealed class ServeCommand : AsyncCommand<ServeCommand.Settings>
             AnsiConsole.MarkupLine($"     [grey]... --token {config.Identity.Token}[/]");
         }
         AnsiConsole.WriteLine();
-    }
-
-    private static ProcessStartInfo CreateSelfStartInfo(IReadOnlyList<string> args, string workingDirectory)
-    {
-        var processPath = Environment.ProcessPath;
-        var entry = Assembly.GetEntryAssembly()?.Location;
-
-        if (!string.IsNullOrWhiteSpace(processPath) &&
-            string.Equals(Path.GetFileNameWithoutExtension(processPath), "dotnet", StringComparison.OrdinalIgnoreCase))
-        {
-            if (string.IsNullOrWhiteSpace(entry))
-            {
-                throw new InvalidOperationException("Unable to locate entry assembly for dotnet-hosted execution.");
-            }
-
-            var psi = new ProcessStartInfo(processPath)
-            {
-                WorkingDirectory = workingDirectory
-            };
-            psi.ArgumentList.Add(entry);
-            foreach (var a in args)
-            {
-                psi.ArgumentList.Add(a);
-            }
-            return psi;
-        }
-
-        if (string.IsNullOrWhiteSpace(processPath))
-        {
-            if (string.IsNullOrWhiteSpace(entry))
-            {
-                throw new InvalidOperationException("Unable to locate current executable path.");
-            }
-
-            processPath = entry;
-        }
-
-        var psi2 = new ProcessStartInfo(processPath)
-        {
-            WorkingDirectory = workingDirectory
-        };
-        foreach (var a in args)
-        {
-            psi2.ArgumentList.Add(a);
-        }
-        return psi2;
     }
 
     private static string? TryReadToken(string identityPath)

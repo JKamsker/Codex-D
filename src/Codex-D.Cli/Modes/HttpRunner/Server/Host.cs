@@ -317,6 +317,13 @@ public static class Host
                 var latest = await store.TryGetAsync(runId, ct);
                 if (latest is not null && IsTerminal(latest.Status))
                 {
+                    // Avoid a race where the run completes after we read the replay buffer but before we subscribe.
+                    // In that case, we may not have seen a persisted run.completed event yet; emit one derived from the latest record.
+                    await SseWriter.WriteEventAsync(
+                        ctx.Response,
+                        "run.completed",
+                        JsonSerializer.Serialize(latest, Json),
+                        ct);
                     return;
                 }
 

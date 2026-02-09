@@ -2,7 +2,6 @@ using System.ComponentModel;
 using System.Diagnostics;
 using System.Net;
 using System.Reflection;
-using System.Text.Json;
 using CodexD.HttpRunner.Client;
 using CodexD.HttpRunner.Daemon;
 using CodexD.HttpRunner.Server;
@@ -77,16 +76,19 @@ public sealed class ServeCommand : AsyncCommand<ServeCommand.Settings>
             return 2;
         }
 
-        var port = settings.Port ?? StatePaths.DEFAULT_FOREGROUND_PORT;
+        var port = settings.Port ?? TryGetEnvInt("CODEX_D_FOREGROUND_PORT") ?? StatePaths.DEFAULT_FOREGROUND_PORT;
         if (port is <= 0 or > 65535)
         {
             AnsiConsole.MarkupLine($"[red]Invalid --port:[/] {port}");
             return 2;
         }
 
-        var stateDir = string.IsNullOrWhiteSpace(settings.StateDir)
-            ? StatePaths.GetForegroundStateDir(Directory.GetCurrentDirectory())
-            : Path.GetFullPath(settings.StateDir);
+        var stateDirRaw = string.IsNullOrWhiteSpace(settings.StateDir)
+            ? TrimOrNull(Environment.GetEnvironmentVariable("CODEX_D_FOREGROUND_STATE_DIR")) ??
+              StatePaths.GetForegroundStateDir(Directory.GetCurrentDirectory())
+            : settings.StateDir;
+
+        var stateDir = Path.GetFullPath(stateDirRaw);
 
         var identityFile = StatePaths.IdentityFile(stateDir);
         var identityStore = new IdentityStore(identityFile);
@@ -125,16 +127,18 @@ public sealed class ServeCommand : AsyncCommand<ServeCommand.Settings>
             return 2;
         }
 
-        var port = settings.Port ?? StatePaths.DEFAULT_DAEMON_PORT;
+        var port = settings.Port ?? TryGetEnvInt("CODEX_D_DAEMON_PORT") ?? StatePaths.DEFAULT_DAEMON_PORT;
         if (port is < 0 or > 65535)
         {
             AnsiConsole.MarkupLine($"[red]Invalid --port:[/] {port}");
             return 2;
         }
 
-        var stateDir = string.IsNullOrWhiteSpace(settings.StateDir)
-            ? StatePaths.GetDaemonStateDir()
-            : Path.GetFullPath(settings.StateDir);
+        var stateDirRaw = string.IsNullOrWhiteSpace(settings.StateDir)
+            ? TrimOrNull(Environment.GetEnvironmentVariable("CODEX_D_DAEMON_STATE_DIR")) ?? StatePaths.GetDaemonStateDir()
+            : settings.StateDir;
+
+        var stateDir = Path.GetFullPath(stateDirRaw);
 
         Directory.CreateDirectory(stateDir);
 
@@ -183,7 +187,7 @@ public sealed class ServeCommand : AsyncCommand<ServeCommand.Settings>
         {
             if (DaemonRuntimeFile.TryRead(runtimePath, out var runtime) && runtime is not null)
             {
-                var token = TryReadToken(identityPath);
+                var token = IdentityFileReader.TryReadToken(identityPath);
                 if (await RunnerHealth.IsHealthyAsync(runtime.BaseUrl, token, cancellationToken))
                 {
                     AnsiConsole.Write(new Rule("[bold]codex-d http serve -d[/]").LeftJustified());
@@ -211,15 +215,17 @@ public sealed class ServeCommand : AsyncCommand<ServeCommand.Settings>
             return 2;
         }
 
-        var port = settings.Port ?? StatePaths.DEFAULT_DAEMON_PORT;
+        var port = settings.Port ?? TryGetEnvInt("CODEX_D_DAEMON_PORT") ?? StatePaths.DEFAULT_DAEMON_PORT;
         if (port is < 0 or > 65535)
         {
             return 2;
         }
 
-        var stateDir = string.IsNullOrWhiteSpace(settings.StateDir)
-            ? StatePaths.GetDaemonStateDir()
-            : Path.GetFullPath(settings.StateDir);
+        var stateDirRaw = string.IsNullOrWhiteSpace(settings.StateDir)
+            ? TrimOrNull(Environment.GetEnvironmentVariable("CODEX_D_DAEMON_STATE_DIR")) ?? StatePaths.GetDaemonStateDir()
+            : settings.StateDir;
+
+        var stateDir = Path.GetFullPath(stateDirRaw);
 
         var identityFile = StatePaths.IdentityFile(stateDir);
         var identityStore = new IdentityStore(identityFile);
@@ -299,36 +305,6 @@ public sealed class ServeCommand : AsyncCommand<ServeCommand.Settings>
         AnsiConsole.WriteLine();
     }
 
-    private static string? TryReadToken(string identityPath)
-    {
-        try
-        {
-            if (!File.Exists(identityPath))
-            {
-                return null;
-            }
-
-            var json = File.ReadAllText(identityPath);
-            if (string.IsNullOrWhiteSpace(json))
-            {
-                return null;
-            }
-
-            using var doc = JsonDocument.Parse(json);
-            if (!doc.RootElement.TryGetProperty("token", out var tokenEl) || tokenEl.ValueKind != JsonValueKind.String)
-            {
-                return null;
-            }
-
-            var token = tokenEl.GetString();
-            return string.IsNullOrWhiteSpace(token) ? null : token.Trim();
-        }
-        catch
-        {
-            return null;
-        }
-    }
-
     private static int TryResolveBoundPort(Microsoft.AspNetCore.Builder.WebApplication app)
     {
         try
@@ -352,5 +328,14 @@ public sealed class ServeCommand : AsyncCommand<ServeCommand.Settings>
         {
             return 0;
         }
+    }
+
+    private static string? TrimOrNull(string? value) =>
+        string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+
+    private static int? TryGetEnvInt(string name)
+    {
+        var raw = TrimOrNull(Environment.GetEnvironmentVariable(name));
+        return int.TryParse(raw, out var i) ? i : null;
     }
 }

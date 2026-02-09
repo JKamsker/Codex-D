@@ -67,7 +67,16 @@ public sealed class ExecCommand : AsyncCommand<ExecCommand.Settings>
 
     public override async Task<int> ExecuteAsync(CommandContext context, Settings settings, CancellationToken cancellationToken)
     {
-        var resolved = settings.Resolve();
+        ResolvedClientSettings resolved;
+        try
+        {
+            resolved = await settings.ResolveAsync(cancellationToken);
+        }
+        catch (RunnerResolutionFailure ex)
+        {
+            Console.Error.WriteLine(ex.UserMessage);
+            return 1;
+        }
 
         var isReview = settings.Prompt.Length > 0 &&
                        string.Equals(settings.Prompt[0], "review", StringComparison.OrdinalIgnoreCase);

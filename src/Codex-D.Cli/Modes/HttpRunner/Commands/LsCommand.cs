@@ -14,7 +14,16 @@ public sealed class LsCommand : AsyncCommand<LsCommand.Settings>
 
     public override async Task<int> ExecuteAsync(CommandContext context, Settings settings, CancellationToken cancellationToken)
     {
-        var resolved = settings.Resolve();
+        ResolvedClientSettings resolved;
+        try
+        {
+            resolved = await settings.ResolveAsync(cancellationToken);
+        }
+        catch (RunnerResolutionFailure ex)
+        {
+            Console.Error.WriteLine(ex.UserMessage);
+            return 1;
+        }
         using var client = new RunnerClient(resolved.BaseUrl, resolved.Token);
 
         var runs = await client.ListRunsAsync(resolved.Cwd, settings.All, cancellationToken);

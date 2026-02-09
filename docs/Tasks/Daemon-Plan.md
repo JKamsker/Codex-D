@@ -304,7 +304,7 @@ Command-line flags always win over env vars.
 
 * [x] Update `http serve` default state dir to `<cwd>\.codex-d` (unless `--state-dir` / env override).
 * [x] Ensure printed banner shows the new StateDir.
-* [ ] Ensure this change doesn’t affect daemon defaults.
+* [x] Ensure this change doesn’t affect daemon defaults.
 
 ### C) Daemon serve command (Windows detached)
 
@@ -348,20 +348,20 @@ Command-line flags always win over env vars.
   * [x] Contains baseUrl/port/listen/pid/version/stateDir/startTime.
 * [x] Must write the file **after** Kestrel binds and the final port is known.
 
-  * [ ] If using port `0`, resolve the actual port from server addresses.
+  * [x] If using port `0`, resolve the actual port from server addresses.
 
 ### F) Client “prefer daemon” resolution (no autostart)
 
-* [ ] Implement a shared resolver used by exec/review/attach/ls:
+* [x] Implement a shared resolver used by exec/review/attach/ls:
 
-  * [ ] If `--url`/env URL set → use that.
-  * [ ] Else try daemon runtime file → health check → if ok use daemon.
-  * [ ] Else try `http://127.0.0.1:8787` → health check → if ok use it.
-  * [ ] Else print the required error message (start daemon).
-* [ ] Implement token fallback:
+  * [x] If `--url`/env URL set → use that.
+  * [x] Else try daemon runtime file → health check → if ok use daemon.
+  * [x] Else try `http://127.0.0.1:8787` → health check → if ok use it.
+  * [x] Else print the required error message (start daemon).
+* [x] Implement token fallback:
 
-  * [ ] If connecting to daemon and no token provided → load `<daemonConfigDir>\identity.json`.
-  * [ ] If connecting to foreground and server responds 401 and no token provided → load `<cwd>\.codex-d\identity.json`.
+  * [x] If connecting to daemon and no token provided → load `<daemonConfigDir>\identity.json`.
+  * [x] If connecting to foreground and server responds 401 and no token provided → load `<cwd>\.codex-d\identity.json`.
 
 ### G) Documentation updates
 
@@ -376,19 +376,19 @@ Command-line flags always win over env vars.
 
 ### H) Tests
 
-* [ ] Update/replace `ClientSettingsBaseTests`:
+* [x] Update/replace `ClientSettingsBaseTests`:
 
-  * [ ] Defaults should now be “daemon-first”, not hardcoded base URL only.
-  * [ ] Add tests for:
+  * [x] Defaults should now be “daemon-first”, not hardcoded base URL only.
+  * [x] Add tests for:
 
-    * [ ] `--url` overrides daemon preference
-    * [ ] runtime file present + health OK selects daemon
-    * [ ] daemon missing/unreachable falls back to static foreground port
-    * [ ] neither available → consistent error message
-* [ ] Add test utilities for faking:
+    * [x] `--url` overrides daemon preference
+    * [x] runtime file present + health OK selects daemon
+    * [x] daemon missing/unreachable falls back to static foreground port
+    * [x] neither available → consistent error message
+* [x] Add test utilities for faking:
 
-  * [ ] daemon runtime file content
-  * [ ] health endpoint responses (200/401/fail)
+  * [x] daemon runtime file content
+  * [x] health endpoint responses (200/401/fail)
 
 ---
 

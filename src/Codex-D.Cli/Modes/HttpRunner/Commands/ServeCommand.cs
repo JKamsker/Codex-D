@@ -101,7 +101,8 @@ public sealed class ServeCommand : AsyncCommand<ServeCommand.Settings>
 
         var identityFile = StatePaths.IdentityFile(stateDir);
         var identityStore = new IdentityStore(identityFile);
-        var identity = await identityStore.LoadOrCreateAsync(settings.Token, cancellationToken);
+        var tokenOverride = TrimOrNull(settings.Token) ?? TryGetEnvTokenOverride();
+        var identity = await identityStore.LoadOrCreateAsync(tokenOverride, cancellationToken);
 
         var isLoopback = IPAddress.IsLoopback(listen);
         var requireAuth = settings.RequireAuth || !isLoopback;
@@ -159,10 +160,11 @@ public sealed class ServeCommand : AsyncCommand<ServeCommand.Settings>
 
         var desiredVersion = await GetDesiredDaemonVersionAsync(isDev, cancellationToken);
         var installedVersion = TryReadMarker(Path.Combine(daemonBinDir, ".version"));
+        var tokenOverride = TrimOrNull(settings.Token) ?? TryGetEnvTokenOverride();
 
         if (DaemonRuntimeFile.TryRead(runtimePath, out var runtime) && runtime is not null)
         {
-            var token = TrimOrNull(settings.Token) ?? IdentityFileReader.TryReadToken(identityPath);
+            var token = tokenOverride ?? IdentityFileReader.TryReadToken(identityPath);
             var health = await RunnerHealth.CheckAsync(runtime.BaseUrl, token, cancellationToken);
 
             if (health == RunnerHealthStatus.Ok)
@@ -235,21 +237,33 @@ public sealed class ServeCommand : AsyncCommand<ServeCommand.Settings>
             "--require-auth"
         };
 
-        if (!string.IsNullOrWhiteSpace(settings.Token))
+        try
         {
-            args.Add("--token");
-            args.Add(settings.Token.Trim());
+            await DaemonSelfInstaller.InstallSelfAsync(daemonBinDir, desiredVersion, forceInstall, cancellationToken);
         }
-
-        await DaemonSelfInstaller.InstallSelfAsync(daemonBinDir, desiredVersion, forceInstall, cancellationToken);
+        catch (Exception ex)
+        {
+            AnsiConsole.MarkupLine($"[red]Failed to install daemon binaries:[/] {ex.Message}");
+            return 1;
+        }
 
         var psi = DaemonSelfInstaller.CreateInstalledStartInfo(daemonBinDir, args);
         psi.CreateNoWindow = true;
         psi.UseShellExecute = false;
 
+        if (!string.IsNullOrWhiteSpace(tokenOverride))
+        {
+            psi.Environment["CODEX_D_TOKEN"] = tokenOverride;
+        }
+
         try
         {
-            _ = Process.Start(psi);
+            var process = Process.Start(psi);
+            if (process is null)
+            {
+                AnsiConsole.MarkupLine("[red]Failed to start daemon child.[/]");
+                return 1;
+            }
         }
         catch (Exception ex)
         {
@@ -262,7 +276,7 @@ public sealed class ServeCommand : AsyncCommand<ServeCommand.Settings>
         {
             if (DaemonRuntimeFile.TryRead(runtimePath, out var rt) && rt is not null)
             {
-                var token = TrimOrNull(settings.Token) ?? IdentityFileReader.TryReadToken(identityPath);
+                var token = tokenOverride ?? IdentityFileReader.TryReadToken(identityPath);
                 if (await RunnerHealth.IsHealthyAsync(rt.BaseUrl, token, cancellationToken))
                 {
                     AnsiConsole.Write(new Rule("[bold]codex-d http serve -d[/]").LeftJustified());
@@ -306,18 +320,18 @@ public sealed class ServeCommand : AsyncCommand<ServeCommand.Settings>
 
         var identityFile = StatePaths.IdentityFile(stateDir);
         var identityStore = new IdentityStore(identityFile);
-        var identity = await identityStore.LoadOrCreateAsync(settings.Token, cancellationToken);
+        var tokenOverride = TrimOrNull(settings.Token) ?? TryGetEnvTokenOverride();
+        var identity = await identityStore.LoadOrCreateAsync(tokenOverride, cancellationToken);
 
         var isLoopback = IPAddress.IsLoopback(listen);
         var displayHost = isLoopback ? "127.0.0.1" : listen.ToString();
-        var baseUrl = $"http://{displayHost}:{port}";
 
         var config = new ServerConfig
         {
             ListenAddress = listen,
             Port = port,
             RequireAuth = true,
-            BaseUrl = baseUrl,
+            BaseUrl = string.Empty,
             StateDirectory = stateDir,
             Identity = identity,
             StartedAtUtc = DateTimeOffset.UtcNow
@@ -334,11 +348,16 @@ public sealed class ServeCommand : AsyncCommand<ServeCommand.Settings>
             return 1;
         }
 
+        var resolvedPort = actualPort == 0 ? port : actualPort;
+        var baseUrl = $"http://{displayHost}:{resolvedPort}";
+        config.Port = resolvedPort;
+        config.BaseUrl = baseUrl;
+
         var runtime = new DaemonRuntimeInfo
         {
-            BaseUrl = $"http://{displayHost}:{(actualPort == 0 ? port : actualPort)}",
+            BaseUrl = baseUrl,
             Listen = listen.ToString(),
-            Port = actualPort == 0 ? port : actualPort,
+            Port = resolvedPort,
             Pid = Environment.ProcessId,
             StartedAtUtc = config.StartedAtUtc,
             StateDir = stateDir,
@@ -511,5 +530,12 @@ public sealed class ServeCommand : AsyncCommand<ServeCommand.Settings>
     {
         var raw = TrimOrNull(Environment.GetEnvironmentVariable(name));
         return int.TryParse(raw, out var i) ? i : null;
+    }
+
+    private static string? TryGetEnvTokenOverride()
+    {
+        return
+            TrimOrNull(Environment.GetEnvironmentVariable("CODEX_D_TOKEN")) ??
+            TrimOrNull(Environment.GetEnvironmentVariable("CODEX_RUNNER_TOKEN"));
     }
 }

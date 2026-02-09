@@ -18,7 +18,18 @@ public static class DaemonSelfInstaller
         }
 
         var sourceDir = AppContext.BaseDirectory;
-        CopyDirectoryContents(sourceDir, daemonBinDir);
+        try
+        {
+            CopyDirectoryContents(sourceDir, daemonBinDir);
+        }
+        catch (IOException ex)
+        {
+            throw new InvalidOperationException("Failed to upgrade daemon binaries. Stop the running daemon (or use --force) and try again.", ex);
+        }
+        catch (UnauthorizedAccessException ex)
+        {
+            throw new InvalidOperationException("Failed to upgrade daemon binaries due to permissions. Stop the running daemon (or use --force) and try again.", ex);
+        }
 
         await File.WriteAllTextAsync(markerPath, desiredVersion, ct);
     }

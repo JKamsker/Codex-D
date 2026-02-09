@@ -1,0 +1,27 @@
+.env
+**/bin/
+**/obj/
+
+# Compiled binaries (in case outputs end up outside bin/obj)
+*.dll
+*.exe
+*.pdb
+*.so
+*.dylib
+
+# Some tools can accidentally create Windows-style output dirs on Linux (e.g. "bin\\Debug")
+**/bin\\*/
+**/obj\\*/
+
+# IDE / user-specific
+.vs/
+.idea/
+**/*.user
+**/*.suo
+
+# Local app/daemon artifacts
+.local/
+
+# Local Docker Compose overrides
+docker-compose.override.yml
+docker-compose.override.yaml

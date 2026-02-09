@@ -148,19 +148,22 @@ public static class Host
             });
         });
 
-        app.MapGet("/v1/info", (ServerConfig cfg) =>
+        app.MapGet("/v1/info", (HttpRequest req, ServerConfig cfg) =>
         {
             var version = typeof(Host).Assembly.GetName().Version?.ToString();
+            var host = req.Host.ToUriComponent();
+            var baseUrl = string.IsNullOrWhiteSpace(host) ? cfg.BaseUrl : $"{req.Scheme}://{host}";
+            var port = req.Host.Port ?? cfg.Port;
             return Results.Ok(new
             {
                 startedAtUtc = cfg.StartedAtUtc,
                 runnerId = cfg.Identity.RunnerId,
                 version,
                 listen = cfg.ListenAddress.ToString(),
-                port = cfg.Port,
+                port,
                 requireAuth = cfg.RequireAuth,
                 stateDir = cfg.StateDirectory,
-                baseUrl = cfg.BaseUrl
+                baseUrl
             });
         });
 

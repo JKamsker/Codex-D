@@ -45,17 +45,17 @@ function Test-DirWritable([string]$dir) {
 function Find-BinDir {
   $pathEntries = Get-AllPathEntries
 
-  $home = $env:USERPROFILE
+  $userHome = $env:USERPROFILE
   $generalCandidates = @(
-    (Join-Path $home '.local\bin'),
-    (Join-Path $home '.cargo\bin'),
-    (Join-Path $home 'bin')
+    (Join-Path $userHome '.local\bin'),
+    (Join-Path $userHome '.cargo\bin'),
+    (Join-Path $userHome 'bin')
   )
 
   $pkgCandidates = @(
-    (Join-Path $home '.dotnet\tools'),
+    (Join-Path $userHome '.dotnet\tools'),
     (Join-Path $env:APPDATA 'npm'),
-    (Join-Path $home 'scoop\shims')
+    (Join-Path $userHome 'scoop\shims')
   )
 
   foreach ($dir in $generalCandidates) {

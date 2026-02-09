@@ -75,6 +75,32 @@ public sealed class RunnerClient : IDisposable
                ?? throw new InvalidOperationException("Invalid run JSON.");
     }
 
+    public async Task<JsonElement> GetHealthAsync(CancellationToken ct)
+    {
+        using var res = await _http.GetAsync($"{_baseUrl}/v1/health", ct);
+        var text = await res.Content.ReadAsStringAsync(ct);
+        if (!res.IsSuccessStatusCode)
+        {
+            throw new InvalidOperationException($"HTTP {(int)res.StatusCode}: {text}");
+        }
+
+        using var doc = JsonDocument.Parse(text);
+        return doc.RootElement.Clone();
+    }
+
+    public async Task<JsonElement> GetInfoAsync(CancellationToken ct)
+    {
+        using var res = await _http.GetAsync($"{_baseUrl}/v1/info", ct);
+        var text = await res.Content.ReadAsStringAsync(ct);
+        if (!res.IsSuccessStatusCode)
+        {
+            throw new InvalidOperationException($"HTTP {(int)res.StatusCode}: {text}");
+        }
+
+        using var doc = JsonDocument.Parse(text);
+        return doc.RootElement.Clone();
+    }
+
     public async Task InterruptAsync(Guid runId, CancellationToken ct)
     {
         using var res = await _http.PostAsync($"{_baseUrl}/v1/runs/{runId:D}/interrupt", content: null, ct);
@@ -83,6 +109,95 @@ public sealed class RunnerClient : IDisposable
             var text = await res.Content.ReadAsStringAsync(ct);
             throw new InvalidOperationException($"HTTP {(int)res.StatusCode}: {text}");
         }
+    }
+
+    public async Task<IReadOnlyList<string>> GetRunMessagesAsync(Guid runId, int count, int? tailEvents, CancellationToken ct)
+    {
+        if (count <= 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(count), "count must be > 0");
+        }
+
+        var query = new List<string> { $"count={count}" };
+        if (tailEvents is { } t && t > 0)
+        {
+            query.Add($"tailEvents={t}");
+        }
+
+        var url = $"{_baseUrl}/v1/runs/{runId:D}/messages?{string.Join("&", query)}";
+
+        using var res = await _http.GetAsync(url, ct);
+        var text = await res.Content.ReadAsStringAsync(ct);
+        if (!res.IsSuccessStatusCode)
+        {
+            throw new InvalidOperationException($"HTTP {(int)res.StatusCode}: {text}");
+        }
+
+        using var doc = JsonDocument.Parse(text);
+        if (!doc.RootElement.TryGetProperty("items", out var itemsEl) || itemsEl.ValueKind != JsonValueKind.Array)
+        {
+            return Array.Empty<string>();
+        }
+
+        var items = new List<string>();
+        foreach (var item in itemsEl.EnumerateArray())
+        {
+            if (!item.TryGetProperty("text", out var textEl) || textEl.ValueKind != JsonValueKind.String)
+            {
+                continue;
+            }
+
+            var msg = textEl.GetString();
+            if (!string.IsNullOrWhiteSpace(msg))
+            {
+                items.Add(msg);
+            }
+        }
+
+        return items;
+    }
+
+    public async Task<IReadOnlyList<string>> GetRunThinkingSummariesAsync(Guid runId, int? tailEvents, CancellationToken ct)
+    {
+        var query = new List<string>();
+        if (tailEvents is { } t && t > 0)
+        {
+            query.Add($"tailEvents={t}");
+        }
+
+        var url = query.Count == 0
+            ? $"{_baseUrl}/v1/runs/{runId:D}/thinking-summaries"
+            : $"{_baseUrl}/v1/runs/{runId:D}/thinking-summaries?{string.Join("&", query)}";
+
+        using var res = await _http.GetAsync(url, ct);
+        var text = await res.Content.ReadAsStringAsync(ct);
+        if (!res.IsSuccessStatusCode)
+        {
+            throw new InvalidOperationException($"HTTP {(int)res.StatusCode}: {text}");
+        }
+
+        using var doc = JsonDocument.Parse(text);
+        if (!doc.RootElement.TryGetProperty("items", out var itemsEl) || itemsEl.ValueKind != JsonValueKind.Array)
+        {
+            return Array.Empty<string>();
+        }
+
+        var items = new List<string>();
+        foreach (var item in itemsEl.EnumerateArray())
+        {
+            if (item.ValueKind != JsonValueKind.String)
+            {
+                continue;
+            }
+
+            var s = item.GetString();
+            if (!string.IsNullOrWhiteSpace(s))
+            {
+                items.Add(s);
+            }
+        }
+
+        return items;
     }
 
     public async IAsyncEnumerable<SseEvent> GetEventsAsync(

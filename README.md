@@ -103,14 +103,28 @@ codex-d http exec -d "Long task"
 Attach to a run:
 
 ```bash
-codex-d http attach <RUN_ID>
+codex-d http run attach <RUN_ID>
 ```
 
 List runs (defaults to current directory; use `--all` for everything):
 
 ```bash
-codex-d http ls
-codex-d http ls --all
+codex-d http runs ls
+codex-d http runs ls --all
+```
+
+Interrupt a run:
+
+```bash
+codex-d http run interrupt <RUN_ID>
+codex-d http run interrupt --last
+```
+
+Inspect a run’s output artifacts:
+
+```bash
+codex-d http run messages <RUN_ID>
+codex-d http run thinking <RUN_ID>
 ```
 
 Client env vars:

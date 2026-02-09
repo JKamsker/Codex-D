@@ -96,16 +96,21 @@ public abstract class ClientSettingsBase : CommandSettings
 
         var fgAttempt = fgHealth == RunnerHealthStatus.Unauthorized ? "unauthorized" : "unreachable";
 
+        var startHint = OperatingSystem.IsWindows()
+            ?
+$@"
+Start the daemon:
+  codex-d http serve -d
+"
+            : string.Empty;
+
         throw new RunnerResolutionFailure(
 $@"No running codex-d HTTP server found.
 
 Tried:
   - Daemon: {daemonRuntimePath} ({daemonAttempt})
   - Foreground: {foregroundBaseUrl} ({fgAttempt})
-
-Start the daemon:
-  codex-d http serve -d
-
+{startHint}
 Or start a foreground server (project-local):
   codex-d http serve");
     }

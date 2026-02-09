@@ -31,38 +31,6 @@ public sealed class ExecCommand : AsyncCommand<ExecCommand.Settings>
         [CommandOption("--approval-policy <POLICY>")]
         [DefaultValue("never")]
         public string ApprovalPolicy { get; init; } = "never";
-
-        [CommandOption("--uncommitted")]
-        [Description("Review staged/unstaged/untracked changes (only valid with `exec review`).")]
-        public bool ReviewUncommitted { get; init; }
-
-        [CommandOption("--base <BRANCH>")]
-        [Description("Review changes against base branch (only valid with `exec review`).")]
-        public string? ReviewBaseBranch { get; init; }
-
-        [CommandOption("--commit <SHA>")]
-        [Description("Review a specific commit SHA (only valid with `exec review`).")]
-        public string? ReviewCommitSha { get; init; }
-
-        [CommandOption("--title <TITLE>")]
-        [Description("Optional review title (only valid with `exec review`).")]
-        public string? ReviewTitle { get; init; }
-
-        [CommandOption("--review-arg <ARG>")]
-        [Description("Additional raw args forwarded to `codex review` (repeatable; only valid with `exec review`).")]
-        public string[] ReviewArg { get; init; } = [];
-
-        [CommandOption("-c|--config <KEY=VALUE>")]
-        [Description("Forward a `--config <key=value>` option to `codex review` (repeatable; only valid with `exec review`).")]
-        public string[] ReviewConfig { get; init; } = [];
-
-        [CommandOption("--enable <FEATURE>")]
-        [Description("Forward an `--enable <feature>` option to `codex review` (repeatable; only valid with `exec review`).")]
-        public string[] ReviewEnable { get; init; } = [];
-
-        [CommandOption("--disable <FEATURE>")]
-        [Description("Forward a `--disable <feature>` option to `codex review` (repeatable; only valid with `exec review`).")]
-        public string[] ReviewDisable { get; init; } = [];
     }
 
     public override async Task<int> ExecuteAsync(CommandContext context, Settings settings, CancellationToken cancellationToken)
@@ -80,21 +48,11 @@ public sealed class ExecCommand : AsyncCommand<ExecCommand.Settings>
 
         try
         {
-            var isReview = settings.Prompt.Length > 0 &&
-                           string.Equals(settings.Prompt[0], "review", StringComparison.OrdinalIgnoreCase);
-
-            if (!isReview && UsesReviewOptions(settings))
-            {
-                throw new ArgumentException("Review options are only valid with `codex-d http exec review ...`.");
-            }
-
-            var prompt = isReview ? ResolveReviewPrompt(settings) : ResolvePrompt(settings);
+            var prompt = ResolvePrompt(settings);
 
             using var client = new RunnerClient(resolved.BaseUrl, resolved.Token);
 
-            var request = isReview
-                ? CreateReviewRequest(settings, resolved.Cwd, prompt)
-                : CreateExecRequest(settings, resolved.Cwd, prompt);
+            var request = CreateExecRequest(settings, resolved.Cwd, prompt);
 
             var created = await client.CreateRunAsync(request, cancellationToken);
             var runId = created.RunId;
@@ -133,65 +91,6 @@ public sealed class ExecCommand : AsyncCommand<ExecCommand.Settings>
             ApprovalPolicy = string.IsNullOrWhiteSpace(settings.ApprovalPolicy) ? "never" : settings.ApprovalPolicy.Trim()
         };
 
-    private static CreateRunRequest CreateReviewRequest(Settings settings, string cwd, string prompt)
-    {
-        var baseBranch = TrimOrNull(settings.ReviewBaseBranch);
-        var commitSha = TrimOrNull(settings.ReviewCommitSha);
-        var uncommitted = settings.ReviewUncommitted;
-
-        var targets = 0;
-        if (uncommitted) targets++;
-        if (!string.IsNullOrWhiteSpace(baseBranch)) targets++;
-        if (!string.IsNullOrWhiteSpace(commitSha)) targets++;
-
-        if (targets == 0)
-        {
-            uncommitted = true;
-        }
-
-        if (targets > 1)
-        {
-            throw new ArgumentException("Only one of --uncommitted, --base, or --commit can be specified for `exec review`.");
-        }
-
-        var review = new RunReviewRequest
-        {
-            Uncommitted = uncommitted,
-            BaseBranch = baseBranch,
-            CommitSha = commitSha,
-            Title = TrimOrNull(settings.ReviewTitle),
-            AdditionalOptions = BuildReviewAdditionalOptions(settings)
-        };
-
-        return new CreateRunRequest
-        {
-            Cwd = cwd,
-            Prompt = prompt,
-            Kind = RunKinds.Review,
-            Review = review,
-            ApprovalPolicy = string.IsNullOrWhiteSpace(settings.ApprovalPolicy) ? "never" : settings.ApprovalPolicy.Trim(),
-            Model = null,
-            Sandbox = null
-        };
-    }
-
-    private static string ResolveReviewPrompt(Settings settings)
-    {
-        // Syntax: `codex-d http exec review [PROMPT...]`
-        var prompt = settings.PromptOption;
-        if (string.IsNullOrWhiteSpace(prompt) && settings.Prompt.Length > 1)
-        {
-            prompt = string.Join(" ", settings.Prompt.Skip(1));
-        }
-
-        if (string.Equals(prompt, "-", StringComparison.Ordinal))
-        {
-            return Console.In.ReadToEnd();
-        }
-
-        return string.IsNullOrWhiteSpace(prompt) ? string.Empty : prompt;
-    }
-
     private static string ResolvePrompt(Settings settings)
     {
         var prompt = settings.PromptOption;
@@ -215,52 +114,6 @@ public sealed class ExecCommand : AsyncCommand<ExecCommand.Settings>
 
     private static string? TrimOrNull(string? value) =>
         string.IsNullOrWhiteSpace(value) ? null : value.Trim();
-
-    private static bool UsesReviewOptions(Settings settings) =>
-        settings.ReviewUncommitted ||
-        !string.IsNullOrWhiteSpace(settings.ReviewBaseBranch) ||
-        !string.IsNullOrWhiteSpace(settings.ReviewCommitSha) ||
-        !string.IsNullOrWhiteSpace(settings.ReviewTitle) ||
-        settings.ReviewArg.Length > 0 ||
-        settings.ReviewConfig.Length > 0 ||
-        settings.ReviewEnable.Length > 0 ||
-        settings.ReviewDisable.Length > 0;
-
-    private static string[] BuildReviewAdditionalOptions(Settings settings)
-    {
-        var args = new List<string>();
-
-        if (!string.IsNullOrWhiteSpace(settings.Model))
-        {
-            args.Add("--model");
-            args.Add(settings.Model.Trim());
-        }
-
-        foreach (var cfg in settings.ReviewConfig.Select(TrimOrNull).Where(x => x is not null))
-        {
-            args.Add("--config");
-            args.Add(cfg!);
-        }
-
-        foreach (var feat in settings.ReviewEnable.Select(TrimOrNull).Where(x => x is not null))
-        {
-            args.Add("--enable");
-            args.Add(feat!);
-        }
-
-        foreach (var feat in settings.ReviewDisable.Select(TrimOrNull).Where(x => x is not null))
-        {
-            args.Add("--disable");
-            args.Add(feat!);
-        }
-
-        foreach (var raw in settings.ReviewArg.Select(TrimOrNull).Where(x => x is not null))
-        {
-            args.Add(raw!);
-        }
-
-        return args.ToArray();
-    }
 
     internal static async Task<int> StreamAsync(
         RunnerClient client,

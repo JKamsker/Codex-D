@@ -151,8 +151,11 @@ public sealed class ClientSettingsBaseTests
 
             var ex = await Assert.ThrowsAsync<RunnerResolutionFailure>(() => s.ResolveAsync(CancellationToken.None));
             Assert.Contains("No running codex-d HTTP server found.", ex.UserMessage, StringComparison.Ordinal);
-            Assert.Contains("Start the daemon:", ex.UserMessage, StringComparison.Ordinal);
-            Assert.Contains("codex-d http serve -d", ex.UserMessage, StringComparison.Ordinal);
+            if (OperatingSystem.IsWindows())
+            {
+                Assert.Contains("Start the daemon:", ex.UserMessage, StringComparison.Ordinal);
+                Assert.Contains("codex-d http serve -d", ex.UserMessage, StringComparison.Ordinal);
+            }
             Assert.Contains($"http://127.0.0.1:{unusedPort}", ex.UserMessage, StringComparison.Ordinal);
         }
         finally

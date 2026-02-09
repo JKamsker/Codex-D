@@ -78,3 +78,25 @@ internal sealed class CoordinatedExecutor : IRunExecutor
         return new RunExecutionResult { Status = RunStatuses.Succeeded, Error = null };
     }
 }
+
+internal sealed class MessagesAndThinkingExecutor : IRunExecutor
+{
+    public async Task<RunExecutionResult> ExecuteAsync(RunExecutionContext context, CancellationToken ct)
+    {
+        context.SetInterrupt(_ => Task.CompletedTask);
+        await context.SetCodexIdsAsync("thread-test", "turn-test", ct);
+
+        // Thinking summaries (server extracts **...** lines from commandExecution output deltas while "thinking" is active).
+        await context.PublishNotificationAsync("item/commandExecution/outputDelta", JsonSerializer.SerializeToElement(new { delta = "thinking" }), ct);
+        await context.PublishNotificationAsync("item/commandExecution/outputDelta", JsonSerializer.SerializeToElement(new { delta = "**Phase 1**\nnot a heading\n**Phase 2**\n" }), ct);
+        await context.PublishNotificationAsync("item/commandExecution/outputDelta", JsonSerializer.SerializeToElement(new { delta = "final" }), ct);
+        await context.PublishNotificationAsync("item/commandExecution/outputDelta", JsonSerializer.SerializeToElement(new { delta = "**ignored**" }), ct);
+
+        // Completed agent messages (server extracts item/completed -> item.type=agentMessage -> item.text).
+        await context.PublishNotificationAsync("item/completed", JsonSerializer.SerializeToElement(new { item = new { type = "agentMessage", text = "one" } }), ct);
+        await context.PublishNotificationAsync("item/completed", JsonSerializer.SerializeToElement(new { item = new { type = "agentMessage", text = "two" } }), ct);
+        await context.PublishNotificationAsync("item/completed", JsonSerializer.SerializeToElement(new { item = new { type = "agentMessage", text = "three" } }), ct);
+
+        return new RunExecutionResult { Status = RunStatuses.Succeeded, Error = null };
+    }
+}

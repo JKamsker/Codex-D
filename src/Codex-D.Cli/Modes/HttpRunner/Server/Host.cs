@@ -249,6 +249,138 @@ public static class Host
             return ok ? Results.Accepted() : Results.NotFound(new { error = "not_found_or_not_running" });
         });
 
+        app.MapGet("/v1/runs/{runId:guid}/messages", async (Guid runId, HttpRequest req, RunStore store, CancellationToken ct) =>
+        {
+            var record = await store.TryGetAsync(runId, ct);
+            if (record is null)
+            {
+                return Results.NotFound(new { error = "not_found" });
+            }
+
+            var count = ParseInt(req.Query["count"]) ?? 1;
+            if (count <= 0)
+            {
+                return Results.BadRequest(new { error = "count_must_be_positive" });
+            }
+
+            count = Math.Min(count, 50);
+
+            var tailEvents = ParseInt(req.Query["tailEvents"]) ?? 20000;
+            if (tailEvents <= 0)
+            {
+                return Results.BadRequest(new { error = "tail_events_must_be_positive" });
+            }
+
+            tailEvents = Math.Min(tailEvents, 200000);
+
+            var events = await store.ReadEventsAsync(runId, tailEvents, ct);
+
+            var queue = new Queue<object>(Math.Min(count, 50));
+            foreach (var env in events)
+            {
+                if (!string.Equals(env.Type, "codex.notification", StringComparison.Ordinal))
+                {
+                    continue;
+                }
+
+                if (!RunEventDataExtractors.TryGetCompletedAgentMessageText(env.Data, out var text) ||
+                    string.IsNullOrWhiteSpace(text))
+                {
+                    continue;
+                }
+
+                if (queue.Count == count)
+                {
+                    queue.Dequeue();
+                }
+
+                queue.Enqueue(new { createdAt = env.CreatedAt, text });
+            }
+
+            return Results.Ok(new { items = queue.ToArray() });
+        });
+
+        app.MapGet("/v1/runs/{runId:guid}/thinking-summaries", async (Guid runId, HttpRequest req, RunStore store, CancellationToken ct) =>
+        {
+            var record = await store.TryGetAsync(runId, ct);
+            if (record is null)
+            {
+                return Results.NotFound(new { error = "not_found" });
+            }
+
+            var tailEvents = ParseInt(req.Query["tailEvents"]) ?? 20000;
+            if (tailEvents <= 0)
+            {
+                return Results.BadRequest(new { error = "tail_events_must_be_positive" });
+            }
+
+            tailEvents = Math.Min(tailEvents, 200000);
+
+            var events = await store.ReadEventsAsync(runId, tailEvents, ct);
+
+            var summaries = new List<string>();
+            var last = string.Empty;
+            var inThinking = false;
+
+            foreach (var env in events)
+            {
+                if (!string.Equals(env.Type, "codex.notification", StringComparison.Ordinal))
+                {
+                    continue;
+                }
+
+                if (!RunEventDataExtractors.TryGetOutputDelta(env.Data, out var delta) ||
+                    string.IsNullOrWhiteSpace(delta))
+                {
+                    continue;
+                }
+
+                var trimmed = delta.Trim();
+                if (string.Equals(trimmed, "thinking", StringComparison.OrdinalIgnoreCase))
+                {
+                    inThinking = true;
+                    continue;
+                }
+
+                if (string.Equals(trimmed, "final", StringComparison.OrdinalIgnoreCase))
+                {
+                    inThinking = false;
+                    continue;
+                }
+
+                var maybeThinking = inThinking || delta.Contains("thinking", StringComparison.OrdinalIgnoreCase);
+                if (!maybeThinking)
+                {
+                    continue;
+                }
+
+                foreach (var rawLine in delta.Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries))
+                {
+                    var t = rawLine.Trim();
+                    if (!t.StartsWith("**", StringComparison.Ordinal) || !t.EndsWith("**", StringComparison.Ordinal) || t.Length <= 4)
+                    {
+                        continue;
+                    }
+
+                    var summary = t[2..^2].Trim();
+                    if (string.IsNullOrWhiteSpace(summary))
+                    {
+                        continue;
+                    }
+
+                    if (string.Equals(summary, last, StringComparison.Ordinal))
+                    {
+                        continue;
+                    }
+
+                    summaries.Add(summary);
+                    last = summary;
+                }
+            }
+
+            return Results.Ok(new { items = summaries });
+        });
+
         app.MapGet("/v1/runs/{runId:guid}/events", async (Guid runId, HttpContext ctx, RunStore store, RunEventBroadcaster broadcaster) =>
         {
             var ct = ctx.RequestAborted;

@@ -287,23 +287,23 @@ Command-line flags always win over env vars.
 
 ### A) Pathing / constants
 
-* [ ] Introduce constants:
+* [x] Introduce constants:
 
-  * [ ] `DEFAULT_FOREGROUND_PORT = 8787`
-  * [ ] `DEFAULT_DAEMON_PORT = 0`
-  * [ ] `DEFAULT_FOREGROUND_STATE_DIR_NAME = ".codex-d"`
-* [ ] Add path helpers:
+  * [x] `DEFAULT_FOREGROUND_PORT = 8787`
+  * [x] `DEFAULT_DAEMON_PORT = 0`
+  * [x] `DEFAULT_FOREGROUND_STATE_DIR_NAME = ".codex-d"`
+* [x] Add path helpers:
 
-  * [ ] `GetDaemonBaseDir()` → `%LOCALAPPDATA%\codex-d\daemon`
-  * [ ] `GetDaemonBinDir()` → `%LOCALAPPDATA%\codex-d\daemon\bin`
-  * [ ] `GetDaemonStateDir()` → `%LOCALAPPDATA%\codex-d\daemon\config`
-  * [ ] `GetForegroundStateDir(cwd)` → `<cwd>\.codex-d`
-  * [ ] `GetDaemonRuntimeFilePath()` → `<daemonStateDir>\daemon.runtime.json`
+  * [x] `GetDaemonBaseDir()` → `%LOCALAPPDATA%\codex-d\daemon`
+  * [x] `GetDaemonBinDir()` → `%LOCALAPPDATA%\codex-d\daemon\bin`
+  * [x] `GetDaemonStateDir()` → `%LOCALAPPDATA%\codex-d\daemon\config`
+  * [x] `GetForegroundStateDir(cwd)` → `<cwd>\.codex-d`
+  * [x] `GetDaemonRuntimeFilePath()` → `<daemonStateDir>\daemon.runtime.json`
 
 ### B) Foreground server default state dir change
 
-* [ ] Update `http serve` default state dir to `<cwd>\.codex-d` (unless `--state-dir` / env override).
-* [ ] Ensure printed banner shows the new StateDir.
+* [x] Update `http serve` default state dir to `<cwd>\.codex-d` (unless `--state-dir` / env override).
+* [x] Ensure printed banner shows the new StateDir.
 * [ ] Ensure this change doesn’t affect daemon defaults.
 
 ### C) Daemon serve command (Windows detached)

@@ -49,7 +49,7 @@ public sealed class ServeCommand : AsyncCommand<ServeCommand.Settings>
         }
 
         var stateDir = string.IsNullOrWhiteSpace(settings.StateDir)
-            ? StatePaths.GetDefaultStateDirectory()
+            ? StatePaths.GetForegroundStateDir(Directory.GetCurrentDirectory())
             : Path.GetFullPath(settings.StateDir);
 
         var identityFile = StatePaths.IdentityFile(stateDir);

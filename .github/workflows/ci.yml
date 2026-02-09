@@ -187,4 +187,4 @@ jobs:
       - name: Mark nightly as latest
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release edit nightly --latest
+        run: gh release edit nightly --latest -R ${{ github.repository }}

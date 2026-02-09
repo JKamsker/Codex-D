@@ -162,6 +162,13 @@ public sealed class ServeCommand : AsyncCommand<ServeCommand.Settings>
         var installedVersion = TryReadMarker(Path.Combine(daemonBinDir, ".version"));
         var tokenOverride = TrimOrNull(settings.Token) ?? TryGetEnvTokenOverride();
 
+        if (settings.Force || isDev || !string.Equals(installedVersion, desiredVersion, StringComparison.Ordinal))
+        {
+            var installedDisplay = installedVersion ?? "<none>";
+            AnsiConsole.MarkupLine($"[grey]Daemon install dir:[/] {daemonBinDir}");
+            AnsiConsole.MarkupLine($"[grey]Daemon version:[/] desired={desiredVersion} installed={installedDisplay}");
+        }
+
         if (DaemonRuntimeFile.TryRead(runtimePath, out var runtime) && runtime is not null)
         {
             var token = tokenOverride ?? IdentityFileReader.TryReadToken(identityPath);
@@ -176,6 +183,8 @@ public sealed class ServeCommand : AsyncCommand<ServeCommand.Settings>
 
                 if (settings.Force || needsDevReplace)
                 {
+                    var reason = settings.Force ? "--force" : "dev version mismatch";
+                    AnsiConsole.MarkupLine($"[grey]Stopping existing daemon (pid {runtime.Pid}) due to {reason}...[/]");
                     await StopDaemonAsync(runtimePath, runtime.Pid, cancellationToken);
                 }
                 else
@@ -199,27 +208,20 @@ public sealed class ServeCommand : AsyncCommand<ServeCommand.Settings>
 
                 if (running)
                 {
+                    var reason = settings.Force ? "--force" : "dev mode restart";
+                    AnsiConsole.MarkupLine($"[grey]Stopping unreachable daemon (pid {runtime.Pid}) due to {reason}...[/]");
                     await StopDaemonAsync(runtimePath, runtime.Pid, cancellationToken);
                 }
                 else
                 {
+                    AnsiConsole.MarkupLine("[grey]Removing stale daemon runtime file...[/]");
                     TryDeleteFile(runtimePath);
                 }
             }
         }
 
-        var forceInstall =
-            settings.Force ||
-            (isDev && !string.Equals(installedVersion, desiredVersion, StringComparison.Ordinal));
-
-        if (!isDev && !settings.Force)
-        {
-            // Non-dev: only update binaries if daemon is stopped and versions differ.
-            if (string.Equals(installedVersion, desiredVersion, StringComparison.Ordinal))
-            {
-                forceInstall = false;
-            }
-        }
+        var shouldInstall = settings.Force || !string.Equals(installedVersion, desiredVersion, StringComparison.Ordinal);
+        var installForce = settings.Force;
 
         var args = new List<string>
         {
@@ -239,7 +241,25 @@ public sealed class ServeCommand : AsyncCommand<ServeCommand.Settings>
 
         try
         {
-            await DaemonSelfInstaller.InstallSelfAsync(daemonBinDir, desiredVersion, forceInstall, cancellationToken);
+            if (shouldInstall)
+            {
+                var reason = settings.Force ? "--force" : "version mismatch";
+                AnsiConsole.MarkupLine($"[grey]Installing daemon binaries ({reason})...[/]");
+
+                var copied = await DaemonSelfInstaller.InstallSelfAsync(daemonBinDir, desiredVersion, installForce, cancellationToken);
+                if (copied)
+                {
+                    AnsiConsole.MarkupLine("[grey]Copied daemon binaries and updated .version marker.[/]");
+                }
+                else
+                {
+                    AnsiConsole.MarkupLine("[grey]Daemon binaries already up-to-date; no copy needed.[/]");
+                }
+            }
+            else
+            {
+                AnsiConsole.MarkupLine("[grey]Daemon binaries already up-to-date; starting daemon.[/]");
+            }
         }
         catch (Exception ex)
         {
@@ -261,7 +281,7 @@ public sealed class ServeCommand : AsyncCommand<ServeCommand.Settings>
             var process = Process.Start(psi);
             if (process is null)
             {
-                AnsiConsole.MarkupLine("[red]Failed to start daemon child.[/]");
+                AnsiConsole.MarkupLine("[red]Failed to start daemon child:[/] Process.Start returned null.");
                 return 1;
             }
         }

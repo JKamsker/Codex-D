@@ -45,7 +45,19 @@ Defaults:
 - Uses a per-user daemon state dir under `%LOCALAPPDATA%`: `%LOCALAPPDATA%\\codex-d\\daemon\\config`
 - Writes a runtime discovery file: `%LOCALAPPDATA%\\codex-d\\daemon\\config\\daemon.runtime.json`
 
+Useful flags:
+- `--force` (stop/replace any running daemon and reinstall binaries before starting)
+
 Clients (`http exec/review/attach/ls`) prefer the daemon by default. If the daemon isn’t available, they fall back to the foreground server at the configured foreground port (default `8787`). No client command will auto-start the daemon in v1.
+
+#### Dev/debug defaults (dotnet run)
+
+When running from source in Debug (the default `dotnet run` configuration):
+- Daemon state dir defaults to `%LOCALAPPDATA%\\codex-d\\daemon-dev`
+- Foreground default port is `8788` (to avoid colliding with Release’s `8787`)
+- Dev daemon installs are versioned by a hash of `HEAD` + uncommitted changes; mismatches auto-replace the running dev daemon
+
+To force dev-mode defaults in a Release build, set `CODEX_D_DEV_MODE=1`.
 
 ### Run a prompt (attached)
 

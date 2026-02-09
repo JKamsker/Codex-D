@@ -26,6 +26,8 @@ public abstract class ClientSettingsBase : CommandSettings
 
     public async Task<ResolvedClientSettings> ResolveAsync(CancellationToken ct)
     {
+        var isDev = BuildMode.IsDev();
+
         var cwd = string.IsNullOrWhiteSpace(Cd) ? Directory.GetCurrentDirectory() : Cd!;
         cwd = PathPolicy.TrimTrailingSeparators(Path.GetFullPath(cwd));
 
@@ -46,7 +48,7 @@ public abstract class ClientSettingsBase : CommandSettings
 
         var daemonStateDir =
             TrimOrNull(Environment.GetEnvironmentVariable("CODEX_D_DAEMON_STATE_DIR")) ??
-            StatePaths.GetDaemonStateDir();
+            StatePaths.GetDefaultDaemonStateDir(isDev);
 
         var daemonRuntimePath = Path.Combine(daemonStateDir, "daemon.runtime.json");
         var daemonAttempt = "missing";
@@ -67,7 +69,7 @@ public abstract class ClientSettingsBase : CommandSettings
             daemonAttempt = "invalid";
         }
 
-        var foregroundPort = TryGetEnvInt("CODEX_D_FOREGROUND_PORT") ?? StatePaths.DEFAULT_FOREGROUND_PORT;
+        var foregroundPort = TryGetEnvInt("CODEX_D_FOREGROUND_PORT") ?? StatePaths.GetDefaultForegroundPort(isDev);
         var foregroundBaseUrl = $"http://127.0.0.1:{foregroundPort}";
 
         var foregroundToken = explicitToken;

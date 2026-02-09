@@ -1,4 +1,5 @@
 using CodexD.HttpRunner.Client;
+using CodexD.HttpRunner.State;
 using CodexD.Shared.Paths;
 using Xunit;
 
@@ -8,6 +9,25 @@ public sealed class ClientSettingsBaseTests
 {
     private sealed class Settings : ClientSettingsBase
     {
+    }
+
+    [Fact]
+    public void StatePaths_DefaultForegroundPort_Is8787()
+    {
+        Assert.Equal(8787, StatePaths.GetDefaultForegroundPort(isDev: false));
+    }
+
+    [Fact]
+    public void StatePaths_DefaultForegroundPortDev_Is8788()
+    {
+        Assert.Equal(8788, StatePaths.GetDefaultForegroundPort(isDev: true));
+    }
+
+    [Fact]
+    public void StatePaths_DefaultDaemonDevDir_EndsWithDaemonDev()
+    {
+        var dir = StatePaths.GetDefaultDaemonStateDir(isDev: true);
+        Assert.EndsWith(Path.Combine("codex-d", "daemon-dev"), dir, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]

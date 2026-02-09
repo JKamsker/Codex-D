@@ -25,6 +25,14 @@ public sealed class ServeCommand : AsyncCommand<ServeCommand.Settings>
         [Description("Internal. Used by --daemon.")]
         public bool DaemonChild { get; init; }
 
+        [CommandOption("--force")]
+        [Description("Daemon only. Force-stop an existing daemon and reinstall binaries before starting.")]
+        public bool Force { get; init; }
+
+        [CommandOption("--daemon-version <VERSION>")]
+        [Description("Internal. Used by --daemon.")]
+        public string? DaemonVersion { get; init; }
+
         [CommandOption("--listen <IP>")]
         [Description("Listen address. Default: 127.0.0.1")]
         [DefaultValue("127.0.0.1")]
@@ -76,7 +84,8 @@ public sealed class ServeCommand : AsyncCommand<ServeCommand.Settings>
             return 2;
         }
 
-        var port = settings.Port ?? TryGetEnvInt("CODEX_D_FOREGROUND_PORT") ?? StatePaths.DEFAULT_FOREGROUND_PORT;
+        var isDev = BuildMode.IsDev();
+        var port = settings.Port ?? TryGetEnvInt("CODEX_D_FOREGROUND_PORT") ?? StatePaths.GetDefaultForegroundPort(isDev);
         if (port is <= 0 or > 65535)
         {
             AnsiConsole.MarkupLine($"[red]Invalid --port:[/] {port}");
@@ -121,6 +130,8 @@ public sealed class ServeCommand : AsyncCommand<ServeCommand.Settings>
 
     private static async Task<int> RunDaemonParentAsync(Settings settings, CancellationToken cancellationToken)
     {
+        var isDev = BuildMode.IsDev();
+
         if (!IPAddress.TryParse(settings.Listen, out var listen) || listen is null)
         {
             AnsiConsole.MarkupLine($"[red]Invalid --listen IP:[/] {settings.Listen}");
@@ -135,18 +146,81 @@ public sealed class ServeCommand : AsyncCommand<ServeCommand.Settings>
         }
 
         var stateDirRaw = string.IsNullOrWhiteSpace(settings.StateDir)
-            ? TrimOrNull(Environment.GetEnvironmentVariable("CODEX_D_DAEMON_STATE_DIR")) ?? StatePaths.GetDaemonStateDir()
+            ? TrimOrNull(Environment.GetEnvironmentVariable("CODEX_D_DAEMON_STATE_DIR")) ?? StatePaths.GetDefaultDaemonStateDir(isDev)
             : settings.StateDir;
 
         var stateDir = Path.GetFullPath(stateDirRaw);
 
         Directory.CreateDirectory(stateDir);
 
+        var daemonBinDir = StatePaths.GetDaemonBinDirForStateDir(stateDir);
+        var runtimePath = Path.Combine(stateDir, "daemon.runtime.json");
+        var identityPath = StatePaths.IdentityFile(stateDir);
+
+        var desiredVersion = await GetDesiredDaemonVersionAsync(isDev, cancellationToken);
+        var installedVersion = TryReadMarker(Path.Combine(daemonBinDir, ".version"));
+
+        if (DaemonRuntimeFile.TryRead(runtimePath, out var runtime) && runtime is not null)
+        {
+            var token = TrimOrNull(settings.Token) ?? IdentityFileReader.TryReadToken(identityPath);
+            var health = await RunnerHealth.CheckAsync(runtime.BaseUrl, token, cancellationToken);
+
+            if (health == RunnerHealthStatus.Ok)
+            {
+                if (settings.Force || (isDev && !string.Equals(installedVersion, desiredVersion, StringComparison.Ordinal)))
+                {
+                    await StopDaemonAsync(runtimePath, runtime.Pid, cancellationToken);
+                }
+                else
+                {
+                    AnsiConsole.Write(new Rule("[bold]codex-d http serve -d[/]").LeftJustified());
+                    AnsiConsole.MarkupLine($"Daemon URL: [cyan]{runtime.BaseUrl}[/]");
+                    AnsiConsole.MarkupLine($"StateDir: [grey]{stateDir}[/]");
+                    AnsiConsole.WriteLine();
+                    return 0;
+                }
+            }
+            else
+            {
+                var running = IsProcessRunning(runtime.Pid);
+                if (running && !(settings.Force || isDev))
+                {
+                    AnsiConsole.MarkupLine("[red]Daemon appears to be running but is unreachable.[/] Use [grey]--force[/] to stop and replace it.");
+                    AnsiConsole.MarkupLine($"StateDir: [grey]{stateDir}[/]");
+                    return 1;
+                }
+
+                if (running)
+                {
+                    await StopDaemonAsync(runtimePath, runtime.Pid, cancellationToken);
+                }
+                else
+                {
+                    TryDeleteFile(runtimePath);
+                }
+            }
+        }
+
+        var forceInstall =
+            settings.Force ||
+            (isDev && !string.Equals(installedVersion, desiredVersion, StringComparison.Ordinal));
+
+        if (!isDev && !settings.Force)
+        {
+            // Non-dev: only update binaries if daemon is stopped and versions differ.
+            if (string.Equals(installedVersion, desiredVersion, StringComparison.Ordinal))
+            {
+                forceInstall = false;
+            }
+        }
+
         var args = new List<string>
         {
             "http",
             "serve",
             "--daemon-child",
+            "--daemon-version",
+            desiredVersion,
             "--listen",
             settings.Listen,
             "--port",
@@ -162,9 +236,7 @@ public sealed class ServeCommand : AsyncCommand<ServeCommand.Settings>
             args.Add(settings.Token.Trim());
         }
 
-        var daemonBinDir = StatePaths.GetDaemonBinDir();
-        var desiredVersion = typeof(ServeCommand).Assembly.GetName().Version?.ToString() ?? "0.0.0";
-        await DaemonSelfInstaller.InstallSelfAsync(daemonBinDir, desiredVersion, force: false, cancellationToken);
+        await DaemonSelfInstaller.InstallSelfAsync(daemonBinDir, desiredVersion, forceInstall, cancellationToken);
 
         var psi = DaemonSelfInstaller.CreateInstalledStartInfo(daemonBinDir, args);
         psi.CreateNoWindow = true;
@@ -180,19 +252,16 @@ public sealed class ServeCommand : AsyncCommand<ServeCommand.Settings>
             return 1;
         }
 
-        var runtimePath = Path.Combine(stateDir, "daemon.runtime.json");
-        var identityPath = StatePaths.IdentityFile(stateDir);
-
         var deadline = DateTimeOffset.UtcNow.AddSeconds(10);
         while (DateTimeOffset.UtcNow < deadline && !cancellationToken.IsCancellationRequested)
         {
-            if (DaemonRuntimeFile.TryRead(runtimePath, out var runtime) && runtime is not null)
+            if (DaemonRuntimeFile.TryRead(runtimePath, out var rt) && rt is not null)
             {
-                var token = IdentityFileReader.TryReadToken(identityPath);
-                if (await RunnerHealth.IsHealthyAsync(runtime.BaseUrl, token, cancellationToken))
+                var token = TrimOrNull(settings.Token) ?? IdentityFileReader.TryReadToken(identityPath);
+                if (await RunnerHealth.IsHealthyAsync(rt.BaseUrl, token, cancellationToken))
                 {
                     AnsiConsole.Write(new Rule("[bold]codex-d http serve -d[/]").LeftJustified());
-                    AnsiConsole.MarkupLine($"Daemon URL: [cyan]{runtime.BaseUrl}[/]");
+                    AnsiConsole.MarkupLine($"Daemon URL: [cyan]{rt.BaseUrl}[/]");
                     AnsiConsole.MarkupLine($"StateDir: [grey]{stateDir}[/]");
                     AnsiConsole.WriteLine();
                     AnsiConsole.MarkupLine($"Try: [grey]codex-d http exec \"Hello\"[/]");
@@ -211,6 +280,8 @@ public sealed class ServeCommand : AsyncCommand<ServeCommand.Settings>
 
     private static async Task<int> RunDaemonChildAsync(Settings settings, CancellationToken cancellationToken)
     {
+        var isDev = BuildMode.IsDev();
+
         if (!IPAddress.TryParse(settings.Listen, out var listen) || listen is null)
         {
             return 2;
@@ -223,7 +294,7 @@ public sealed class ServeCommand : AsyncCommand<ServeCommand.Settings>
         }
 
         var stateDirRaw = string.IsNullOrWhiteSpace(settings.StateDir)
-            ? TrimOrNull(Environment.GetEnvironmentVariable("CODEX_D_DAEMON_STATE_DIR")) ?? StatePaths.GetDaemonStateDir()
+            ? TrimOrNull(Environment.GetEnvironmentVariable("CODEX_D_DAEMON_STATE_DIR")) ?? StatePaths.GetDefaultDaemonStateDir(isDev)
             : settings.StateDir;
 
         var stateDir = Path.GetFullPath(stateDirRaw);
@@ -266,12 +337,109 @@ public sealed class ServeCommand : AsyncCommand<ServeCommand.Settings>
             Pid = Environment.ProcessId,
             StartedAtUtc = config.StartedAtUtc,
             StateDir = stateDir,
-            Version = typeof(ServeCommand).Assembly.GetName().Version?.ToString() ?? "0.0.0"
+            Version = TrimOrNull(settings.DaemonVersion) ?? typeof(ServeCommand).Assembly.GetName().Version?.ToString() ?? "0.0.0"
         };
 
         await DaemonRuntimeFile.WriteAtomicAsync(Path.Combine(stateDir, "daemon.runtime.json"), runtime, cancellationToken);
         await app.WaitForShutdownAsync(cancellationToken);
         return 0;
+    }
+
+    private static async Task<string> GetDesiredDaemonVersionAsync(bool isDev, CancellationToken ct)
+    {
+        var assemblyVersion = typeof(ServeCommand).Assembly.GetName().Version?.ToString() ?? "0.0.0";
+        if (!isDev)
+        {
+            return assemblyVersion;
+        }
+
+        var computed = await DevVersionComputer.TryComputeAsync(Directory.GetCurrentDirectory(), ct);
+        return string.IsNullOrWhiteSpace(computed) ? assemblyVersion : computed.Trim();
+    }
+
+    private static async Task StopDaemonAsync(string runtimePath, int pid, CancellationToken ct)
+    {
+        if (pid > 0)
+        {
+            try
+            {
+                using var p = Process.GetProcessById(pid);
+                try
+                {
+                    p.Kill(entireProcessTree: true);
+                }
+                catch
+                {
+                    // ignore
+                }
+
+                try
+                {
+                    await p.WaitForExitAsync(ct);
+                }
+                catch
+                {
+                    // ignore
+                }
+            }
+            catch
+            {
+                // ignore
+            }
+        }
+
+        TryDeleteFile(runtimePath);
+    }
+
+    private static bool IsProcessRunning(int pid)
+    {
+        if (pid <= 0)
+        {
+            return false;
+        }
+
+        try
+        {
+            using var p = Process.GetProcessById(pid);
+            return !p.HasExited;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    private static string? TryReadMarker(string markerPath)
+    {
+        try
+        {
+            if (!File.Exists(markerPath))
+            {
+                return null;
+            }
+
+            var text = File.ReadAllText(markerPath);
+            return string.IsNullOrWhiteSpace(text) ? null : text.Trim();
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private static void TryDeleteFile(string path)
+    {
+        try
+        {
+            if (File.Exists(path))
+            {
+                File.Delete(path);
+            }
+        }
+        catch
+        {
+            // ignore
+        }
     }
 
     private static void PrintBanner(ServerConfig config, bool isLoopback)

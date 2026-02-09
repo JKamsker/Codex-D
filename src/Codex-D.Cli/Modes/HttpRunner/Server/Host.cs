@@ -18,6 +18,7 @@ namespace CodexD.HttpRunner.Server;
 public static class Host
 {
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
+    private const int MaxSseTail = 200_000;
 
     public static WebApplication Build(
         ServerConfig config,
@@ -215,8 +216,15 @@ public static class Host
                 request = request with { Kind = kind, Review = review, Prompt = request.Prompt ?? string.Empty };
             }
 
-            var created = await runs.CreateAndStartAsync(request with { Kind = kind }, ct);
-            return Results.Ok(new { runId = created.RunId, status = created.Status });
+            try
+            {
+                var created = await runs.CreateAndStartAsync(request with { Kind = kind }, ct);
+                return Results.Ok(new { runId = created.RunId, status = created.Status });
+            }
+            catch (ArgumentException ex)
+            {
+                return Results.BadRequest(new { error = "invalid_request", message = ex.Message });
+            }
         });
 
         app.MapGet("/v1/runs", async (HttpRequest req, RunStore store, CancellationToken ct) =>
@@ -231,7 +239,14 @@ public static class Host
 
             if (!all)
             {
-                cwd = PathPolicy.TrimTrailingSeparators(Path.GetFullPath(cwd));
+                try
+                {
+                    cwd = PathPolicy.TrimTrailingSeparators(Path.GetFullPath(cwd));
+                }
+                catch
+                {
+                    return Results.BadRequest(new { error = "invalid_cwd" });
+                }
             }
 
             var items = await store.ListAsync(all ? null : cwd, all, ct);
@@ -480,9 +495,46 @@ public static class Host
                 return;
             }
 
-            var replay = ParseBool(ctx.Request.Query["replay"]) ?? true;
-            var follow = ParseBool(ctx.Request.Query["follow"]) ?? true;
-            var tail = ParseInt(ctx.Request.Query["tail"]);
+            var replayRaw = ctx.Request.Query["replay"].ToString();
+            var followRaw = ctx.Request.Query["follow"].ToString();
+            var tailRaw = ctx.Request.Query["tail"].ToString();
+
+            var replay = true;
+            if (!string.IsNullOrWhiteSpace(replayRaw) && !bool.TryParse(replayRaw, out replay))
+            {
+                ctx.Response.StatusCode = StatusCodes.Status400BadRequest;
+                await ctx.Response.WriteAsJsonAsync(new { error = "invalid_replay" }, ct);
+                return;
+            }
+
+            var follow = true;
+            if (!string.IsNullOrWhiteSpace(followRaw) && !bool.TryParse(followRaw, out follow))
+            {
+                ctx.Response.StatusCode = StatusCodes.Status400BadRequest;
+                await ctx.Response.WriteAsJsonAsync(new { error = "invalid_follow" }, ct);
+                return;
+            }
+
+            int? tail = null;
+            if (!string.IsNullOrWhiteSpace(tailRaw))
+            {
+                if (!int.TryParse(tailRaw, out var t))
+                {
+                    ctx.Response.StatusCode = StatusCodes.Status400BadRequest;
+                    await ctx.Response.WriteAsJsonAsync(new { error = "invalid_tail" }, ct);
+                    return;
+                }
+
+                if (t <= 0)
+                {
+                    ctx.Response.StatusCode = StatusCodes.Status400BadRequest;
+                    await ctx.Response.WriteAsJsonAsync(new { error = "tail_must_be_positive" }, ct);
+                    return;
+                }
+
+                tail = Math.Min(t, MaxSseTail);
+            }
+
             var replayFormat = (ctx.Request.Query["replayFormat"].ToString() ?? "auto").Trim();
 
             SseWriter.ConfigureHeaders(ctx.Response);
@@ -522,49 +574,100 @@ public static class Host
                 {
                     if (useRawReplay)
                     {
-                        var events = await store.ReadRawEventsAsync(runId, tail, ct);
-                        foreach (var env in events)
+                        if (tail is { } tailValue)
                         {
-                            if (string.Equals(env.Type, "run.meta", StringComparison.Ordinal))
+                            var events = await store.ReadRawEventsAsync(runId, tailValue, ct);
+                            foreach (var env in events)
                             {
-                                continue;
-                            }
+                                if (string.Equals(env.Type, "run.meta", StringComparison.Ordinal))
+                                {
+                                    continue;
+                                }
 
-                            maxReplayedAt = maxReplayedAt is null || env.CreatedAt > maxReplayedAt.Value ? env.CreatedAt : maxReplayedAt;
-                            if (string.Equals(env.Type, "run.completed", StringComparison.Ordinal))
+                                maxReplayedAt = maxReplayedAt is null || env.CreatedAt > maxReplayedAt.Value ? env.CreatedAt : maxReplayedAt;
+                                if (string.Equals(env.Type, "run.completed", StringComparison.Ordinal))
+                                {
+                                    replaySawCompleted = true;
+                                }
+
+                                await SseWriter.WriteEventAsync(
+                                    ctx.Response,
+                                    env.Type,
+                                    env.Data.GetRawText(),
+                                    ct);
+                            }
+                        }
+                        else
+                        {
+                            await foreach (var env in store.EnumerateRawEventsAsync(runId, ct))
                             {
-                                replaySawCompleted = true;
-                            }
+                                if (string.Equals(env.Type, "run.meta", StringComparison.Ordinal))
+                                {
+                                    continue;
+                                }
 
-                            await SseWriter.WriteEventAsync(
-                                ctx.Response,
-                                env.Type,
-                                env.Data.GetRawText(),
-                                ct);
+                                maxReplayedAt = maxReplayedAt is null || env.CreatedAt > maxReplayedAt.Value ? env.CreatedAt : maxReplayedAt;
+                                if (string.Equals(env.Type, "run.completed", StringComparison.Ordinal))
+                                {
+                                    replaySawCompleted = true;
+                                }
+
+                                await SseWriter.WriteEventAsync(
+                                    ctx.Response,
+                                    env.Type,
+                                    env.Data.GetRawText(),
+                                    ct);
+                            }
                         }
                     }
                     else
                     {
-                        var rollup = await store.ReadRollupAsync(runId, tail, ct);
-                        foreach (var rec in rollup)
+                        if (tail is { } tailValue)
                         {
-                            var eventName = rec.Type switch
+                            var rollup = await store.ReadRollupAsync(runId, tailValue, ct);
+                            foreach (var rec in rollup)
                             {
-                                "outputLine" => "codex.rollup.outputLine",
-                                "agentMessage" => "codex.rollup.agentMessage",
-                                _ => null
-                            };
+                                var eventName = rec.Type switch
+                                {
+                                    "outputLine" => "codex.rollup.outputLine",
+                                    "agentMessage" => "codex.rollup.agentMessage",
+                                    _ => null
+                                };
 
-                            if (eventName is null)
-                            {
-                                continue;
+                                if (eventName is null)
+                                {
+                                    continue;
+                                }
+
+                                await SseWriter.WriteEventAsync(
+                                    ctx.Response,
+                                    eventName,
+                                    JsonSerializer.Serialize(rec, Json),
+                                    ct);
                             }
+                        }
+                        else
+                        {
+                            await foreach (var rec in store.EnumerateRollupAsync(runId, ct))
+                            {
+                                var eventName = rec.Type switch
+                                {
+                                    "outputLine" => "codex.rollup.outputLine",
+                                    "agentMessage" => "codex.rollup.agentMessage",
+                                    _ => null
+                                };
 
-                            await SseWriter.WriteEventAsync(
-                                ctx.Response,
-                                eventName,
-                                JsonSerializer.Serialize(rec, Json),
-                                ct);
+                                if (eventName is null)
+                                {
+                                    continue;
+                                }
+
+                                await SseWriter.WriteEventAsync(
+                                    ctx.Response,
+                                    eventName,
+                                    JsonSerializer.Serialize(rec, Json),
+                                    ct);
+                            }
                         }
                     }
                 }

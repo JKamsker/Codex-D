@@ -81,6 +81,23 @@ public sealed class RunnerHttpServerTests
     }
 
     [Fact]
+    public async Task Runs_Create_ReturnsBadRequest_WhenCwdDoesNotExist()
+    {
+        await using var host = await RunnerHttpTestHost.StartAsync(requireAuth: false, new ImmediateSuccessExecutor());
+        using var http = host.CreateHttpClient(includeToken: false);
+
+        var missingCwd = Path.Combine(host.StateDir, "missing");
+        var res = await http.PostAsJsonAsync(
+            "/v1/runs",
+            new CreateRunRequest { Cwd = missingCwd, Prompt = "hi", Model = null, Sandbox = null, ApprovalPolicy = "never" });
+
+        Assert.Equal(HttpStatusCode.BadRequest, res.StatusCode);
+
+        var json = await res.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal("invalid_request", json.GetProperty("error").GetString());
+    }
+
+    [Fact]
     public async Task Sse_ReplayThenFollow_StreamsNotifications_AndCompletes()
     {
         await using var host = await RunnerHttpTestHost.StartAsync(requireAuth: false, new ImmediateSuccessExecutor());
@@ -151,6 +168,29 @@ public sealed class RunnerHttpServerTests
 
         Assert.DoesNotContain(notificationPayloads, p => p.Contains("early", StringComparison.Ordinal));
         Assert.Contains(notificationPayloads, p => p.Contains("late", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task Sse_Tail_RejectsInvalidValues()
+    {
+        await using var host = await RunnerHttpTestHost.StartAsync(requireAuth: false, new ImmediateSuccessExecutor());
+        using var sdk = host.CreateSdkClient(includeToken: false);
+        using var http = host.CreateHttpClient(includeToken: false);
+
+        var cwd = Path.Combine(host.StateDir, "repo");
+        Directory.CreateDirectory(cwd);
+
+        var created = await sdk.CreateRunAsync(new CreateRunRequest { Cwd = cwd, Prompt = "hi", Model = null, Sandbox = null, ApprovalPolicy = "never" }, CancellationToken.None);
+        var runId = created.RunId;
+
+        var resZero = await http.GetAsync($"/v1/runs/{runId:D}/events?replay=false&follow=false&tail=0");
+        Assert.Equal(HttpStatusCode.BadRequest, resZero.StatusCode);
+
+        var resNegative = await http.GetAsync($"/v1/runs/{runId:D}/events?replay=false&follow=false&tail=-1");
+        Assert.Equal(HttpStatusCode.BadRequest, resNegative.StatusCode);
+
+        var resInvalid = await http.GetAsync($"/v1/runs/{runId:D}/events?replay=false&follow=false&tail=abc");
+        Assert.Equal(HttpStatusCode.BadRequest, resInvalid.StatusCode);
     }
 
     [Fact]

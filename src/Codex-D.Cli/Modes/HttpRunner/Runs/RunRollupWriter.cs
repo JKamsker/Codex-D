@@ -1,17 +1,23 @@
 using System.Collections.Concurrent;
 using System.Text;
 using CodexD.HttpRunner.Contracts;
+using Microsoft.Extensions.Logging;
 
 namespace CodexD.HttpRunner.Runs;
 
 public sealed class RunRollupWriter
 {
+    // Avoid unbounded per-run memory usage when output contains extremely long lines without terminators.
+    private const int MaxBufferedChars = 64_000;
+
     private readonly RunStore _store;
+    private readonly ILogger<RunRollupWriter> _logger;
     private readonly ConcurrentDictionary<Guid, RollupState> _states = new();
 
-    public RunRollupWriter(RunStore store)
+    public RunRollupWriter(RunStore store, ILogger<RunRollupWriter> logger)
     {
         _store = store;
+        _logger = logger;
     }
 
     public async Task OnEnvelopeAsync(Guid runId, RunEventEnvelope envelope, CancellationToken ct)
@@ -31,15 +37,26 @@ public sealed class RunRollupWriter
         {
             if (!string.IsNullOrWhiteSpace(text))
             {
-                await _store.AppendRollupRecordAsync(
-                    runId,
-                    new RunRollupRecord
-                    {
-                        Type = "agentMessage",
-                        CreatedAt = envelope.CreatedAt,
-                        Text = text
-                    },
-                    ct);
+                try
+                {
+                    await _store.AppendRollupRecordAsync(
+                        runId,
+                        new RunRollupRecord
+                        {
+                            Type = "agentMessage",
+                            CreatedAt = envelope.CreatedAt,
+                            Text = text
+                        },
+                        ct);
+                }
+                catch (OperationCanceledException) when (ct.IsCancellationRequested)
+                {
+                    throw;
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Failed to persist agent message rollup. runId={RunId}", runId);
+                }
             }
         }
     }
@@ -74,18 +91,50 @@ public sealed class RunRollupWriter
             var trimmed = delta.Trim();
             if (IsControlMarker(trimmed))
             {
-                await _store.AppendRollupRecordAsync(
-                    runId,
-                    new RunRollupRecord
+                if (_states.TryGetValue(runId, out var existing))
+                {
+                    await existing.Gate.WaitAsync(ct);
+                    try
                     {
-                        Type = "outputLine",
-                        CreatedAt = createdAt,
-                        Source = "commandExecution",
-                        Text = trimmed,
-                        EndsWithNewline = false,
-                        IsControl = true
-                    },
-                    ct);
+                        if (existing.Disabled)
+                        {
+                            return;
+                        }
+
+                        if (existing.Buffer.Length > 0)
+                        {
+                            await AppendFromBufferAsync(runId, createdAt, existing, endsWithNewline: false, ct);
+                        }
+                    }
+                    finally
+                    {
+                        existing.Gate.Release();
+                    }
+                }
+
+                try
+                {
+                    await _store.AppendRollupRecordAsync(
+                        runId,
+                        new RunRollupRecord
+                        {
+                            Type = "outputLine",
+                            CreatedAt = createdAt,
+                            Source = "commandExecution",
+                            Text = trimmed,
+                            EndsWithNewline = false,
+                            IsControl = true
+                        },
+                        ct);
+                }
+                catch (OperationCanceledException) when (ct.IsCancellationRequested)
+                {
+                    throw;
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Failed to persist control marker rollup. runId={RunId}", runId);
+                }
                 return;
             }
         }
@@ -95,6 +144,11 @@ public sealed class RunRollupWriter
         await state.Gate.WaitAsync(ct);
         try
         {
+            if (state.Disabled)
+            {
+                return;
+            }
+
             var startIndex = 0;
             if (state.PendingCr)
             {
@@ -121,21 +175,33 @@ public sealed class RunRollupWriter
                         state.PendingCr = true;
                     }
 
-                    var record = BuildLineRecord(createdAt, state.Buffer, endsWithNewline: true);
-                    await _store.AppendRollupRecordAsync(runId, record, ct);
-                    state.Buffer.Clear();
+                    await AppendFromBufferAsync(runId, createdAt, state, endsWithNewline: true, ct);
+                    if (state.Disabled)
+                    {
+                        return;
+                    }
                     continue;
                 }
 
                 if (ch == '\n')
                 {
-                    var record = BuildLineRecord(createdAt, state.Buffer, endsWithNewline: true);
-                    await _store.AppendRollupRecordAsync(runId, record, ct);
-                    state.Buffer.Clear();
+                    await AppendFromBufferAsync(runId, createdAt, state, endsWithNewline: true, ct);
+                    if (state.Disabled)
+                    {
+                        return;
+                    }
                     continue;
                 }
 
                 state.Buffer.Append(ch);
+                if (state.Buffer.Length >= MaxBufferedChars)
+                {
+                    await AppendFromBufferAsync(runId, createdAt, state, endsWithNewline: false, ct);
+                    if (state.Disabled)
+                    {
+                        return;
+                    }
+                }
             }
         }
         finally
@@ -144,12 +210,17 @@ public sealed class RunRollupWriter
         }
     }
 
-    private static RunRollupRecord BuildLineRecord(DateTimeOffset createdAt, StringBuilder buffer, bool endsWithNewline)
+    private async Task AppendFromBufferAsync(
+        Guid runId,
+        DateTimeOffset createdAt,
+        RollupState state,
+        bool endsWithNewline,
+        CancellationToken ct)
     {
-        var text = buffer.ToString();
+        var text = state.Buffer.ToString();
         var trimmed = text.Trim();
         var isControl = IsControlMarker(trimmed);
-        return new RunRollupRecord
+        var record = new RunRollupRecord
         {
             Type = "outputLine",
             CreatedAt = createdAt,
@@ -158,10 +229,38 @@ public sealed class RunRollupWriter
             EndsWithNewline = endsWithNewline,
             IsControl = isControl
         };
+
+        try
+        {
+            await _store.AppendRollupRecordAsync(runId, record, ct);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            state.Disabled = true;
+            if (!state.LoggedDisabled)
+            {
+                state.LoggedDisabled = true;
+                _logger.LogWarning(ex, "Disabling rollup persistence for run due to write failure. runId={RunId}", runId);
+            }
+        }
+        finally
+        {
+            state.Buffer.Clear();
+        }
     }
 
     private async Task FlushUnlockedAsync(Guid runId, DateTimeOffset createdAt, RollupState state, CancellationToken ct)
     {
+        if (state.Disabled)
+        {
+            state.Buffer.Clear();
+            return;
+        }
+
         if (state.Buffer.Length == 0)
         {
             return;
@@ -176,18 +275,29 @@ public sealed class RunRollupWriter
 
         var trimmed = text.Trim();
         var isControl = IsControlMarker(trimmed);
-        await _store.AppendRollupRecordAsync(
-            runId,
-            new RunRollupRecord
-            {
-                Type = "outputLine",
-                CreatedAt = createdAt,
-                Source = "commandExecution",
-                Text = isControl ? trimmed : text,
-                EndsWithNewline = false,
-                IsControl = isControl
-            },
-            ct);
+        try
+        {
+            await _store.AppendRollupRecordAsync(
+                runId,
+                new RunRollupRecord
+                {
+                    Type = "outputLine",
+                    CreatedAt = createdAt,
+                    Source = "commandExecution",
+                    Text = isControl ? trimmed : text,
+                    EndsWithNewline = false,
+                    IsControl = isControl
+                },
+                ct);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to flush rollup buffer. runId={RunId}", runId);
+        }
 
         state.Buffer.Clear();
     }
@@ -204,5 +314,7 @@ public sealed class RunRollupWriter
         public SemaphoreSlim Gate { get; } = new(1, 1);
         public StringBuilder Buffer { get; } = new();
         public bool PendingCr { get; set; }
+        public bool Disabled { get; set; }
+        public bool LoggedDisabled { get; set; }
     }
 }

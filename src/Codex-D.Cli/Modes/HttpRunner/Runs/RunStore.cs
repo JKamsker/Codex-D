@@ -7,9 +7,12 @@ namespace CodexD.HttpRunner.Runs;
 public sealed class RunStore
 {
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
+    private const int MaxTailRecords = 200_000;
 
     private readonly string _stateDirectory;
     private readonly string _runsRoot;
+    private readonly string _runsRootFull;
+    private readonly string _runsRootPrefix;
     private readonly string _indexFile;
     private readonly bool _persistRawEvents;
     private readonly SemaphoreSlim _gate = new(1, 1);
@@ -18,6 +21,8 @@ public sealed class RunStore
     {
         _stateDirectory = stateDirectory;
         _runsRoot = StatePaths.RunsRoot(stateDirectory);
+        _runsRootFull = Path.GetFullPath(_runsRoot);
+        _runsRootPrefix = EnsureTrailingSeparator(_runsRootFull);
         _indexFile = StatePaths.RunsIndexFile(stateDirectory);
         _persistRawEvents = persistRawEvents;
     }
@@ -99,6 +104,14 @@ public sealed class RunStore
             await using var stream = File.Open(file, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
             return await JsonSerializer.DeserializeAsync<Run>(stream, Json, ct);
         }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch
+        {
+            return null;
+        }
         finally
         {
             _gate.Release();
@@ -156,6 +169,8 @@ public sealed class RunStore
         int? tail,
         CancellationToken ct)
     {
+        tail = ClampTail(tail);
+
         var dir = await TryResolveRunDirectoryAsync(runId, ct);
         if (dir is null)
         {
@@ -168,7 +183,8 @@ public sealed class RunStore
             return Array.Empty<RunEventEnvelope>();
         }
 
-        var queue = tail is { } n && n > 0 ? new Queue<RunEventEnvelope>(n) : null;
+        var tailN = tail is { } n && n > 0 ? n : 0;
+        var queue = tailN > 0 ? new Queue<RunEventEnvelope>(tailN) : null;
         var list = queue is null ? new List<RunEventEnvelope>() : null;
 
         using var stream = File.Open(file, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
@@ -199,7 +215,7 @@ public sealed class RunStore
 
             if (queue is not null)
             {
-                if (queue.Count == tail)
+                if (queue.Count == tailN)
                 {
                     queue.Dequeue();
                 }
@@ -241,6 +257,8 @@ public sealed class RunStore
         int? tail,
         CancellationToken ct)
     {
+        tail = ClampTail(tail);
+
         var dir = await TryResolveRunDirectoryAsync(runId, ct);
         if (dir is null)
         {
@@ -253,7 +271,8 @@ public sealed class RunStore
             return Array.Empty<RunRollupRecord>();
         }
 
-        var queue = tail is { } n && n > 0 ? new Queue<RunRollupRecord>(n) : null;
+        var tailN = tail is { } n && n > 0 ? n : 0;
+        var queue = tailN > 0 ? new Queue<RunRollupRecord>(tailN) : null;
         var list = queue is null ? new List<RunRollupRecord>() : null;
 
         using var stream = File.Open(file, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
@@ -284,7 +303,7 @@ public sealed class RunStore
 
             if (queue is not null)
             {
-                if (queue.Count == tail)
+                if (queue.Count == tailN)
                 {
                     queue.Dequeue();
                 }
@@ -317,7 +336,11 @@ public sealed class RunStore
         var results = new List<Run>();
         foreach (var entry in filtered.OrderByDescending(e => e.CreatedAt))
         {
-            var dir = Path.Combine(_runsRoot, entry.RelativeDir);
+            var dir = TryGetSafeRunDirectory(entry.RelativeDir);
+            if (dir is null)
+            {
+                continue;
+            }
             var file = Path.Combine(dir, "run.json");
             if (!File.Exists(file))
             {
@@ -354,11 +377,113 @@ public sealed class RunStore
         {
             if (entries[i].RunId == runId)
             {
-                return Path.Combine(_runsRoot, entries[i].RelativeDir);
+                var resolved = TryGetSafeRunDirectory(entries[i].RelativeDir);
+                if (resolved is not null)
+                {
+                    return resolved;
+                }
+                break;
             }
         }
 
-        return null;
+        // Index may be missing/corrupt (e.g. partial append). Try a best-effort scan of the runs folder
+        // to keep the system resilient to index corruption.
+        var scanned = TryScanForRunDirectory(runId, ct);
+        if (scanned is null)
+        {
+            return null;
+        }
+
+        await TryRepairIndexAsync(runId, scanned, ct);
+        return scanned;
+    }
+
+    public async IAsyncEnumerable<RunEventEnvelope> EnumerateRawEventsAsync(
+        Guid runId,
+        [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct)
+    {
+        var dir = await TryResolveRunDirectoryAsync(runId, ct);
+        if (dir is null)
+        {
+            throw new InvalidOperationException($"Unknown runId: {runId:D}");
+        }
+
+        var file = Path.Combine(dir, "events.jsonl");
+        if (!File.Exists(file))
+        {
+            yield break;
+        }
+
+        using var stream = File.Open(file, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+        using var reader = new StreamReader(stream, System.Text.Encoding.UTF8);
+
+        string? line;
+        while ((line = await reader.ReadLineAsync(ct)) is not null)
+        {
+            if (string.IsNullOrWhiteSpace(line))
+            {
+                continue;
+            }
+
+            RunEventEnvelope? env;
+            try
+            {
+                env = JsonSerializer.Deserialize<RunEventEnvelope>(line, Json);
+            }
+            catch
+            {
+                continue;
+            }
+
+            if (env is not null)
+            {
+                yield return env;
+            }
+        }
+    }
+
+    public async IAsyncEnumerable<RunRollupRecord> EnumerateRollupAsync(
+        Guid runId,
+        [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct)
+    {
+        var dir = await TryResolveRunDirectoryAsync(runId, ct);
+        if (dir is null)
+        {
+            throw new InvalidOperationException($"Unknown runId: {runId:D}");
+        }
+
+        var file = Path.Combine(dir, "rollup.jsonl");
+        if (!File.Exists(file))
+        {
+            yield break;
+        }
+
+        using var stream = File.Open(file, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+        using var reader = new StreamReader(stream, System.Text.Encoding.UTF8);
+
+        string? line;
+        while ((line = await reader.ReadLineAsync(ct)) is not null)
+        {
+            if (string.IsNullOrWhiteSpace(line))
+            {
+                continue;
+            }
+
+            RunRollupRecord? rec;
+            try
+            {
+                rec = JsonSerializer.Deserialize<RunRollupRecord>(line, Json);
+            }
+            catch
+            {
+                continue;
+            }
+
+            if (rec is not null)
+            {
+                yield return rec;
+            }
+        }
     }
 
     private async Task<IReadOnlyList<RunIndexEntry>> ReadIndexAsync(CancellationToken ct)
@@ -427,6 +552,167 @@ public sealed class RunStore
         var d = createdAtUtc.UtcDateTime.ToString("dd");
         return Path.Combine(_runsRoot, y, m, d, runId.ToString("D"));
     }
+
+    private static int? ClampTail(int? tail)
+    {
+        if (tail is not { } n || n <= 0)
+        {
+            return null;
+        }
+
+        return Math.Min(n, MaxTailRecords);
+    }
+
+    private string? TryGetSafeRunDirectory(string relativeDir)
+    {
+        if (string.IsNullOrWhiteSpace(relativeDir))
+        {
+            return null;
+        }
+
+        string combined;
+        try
+        {
+            combined = Path.GetFullPath(Path.Combine(_runsRootFull, relativeDir));
+        }
+        catch
+        {
+            return null;
+        }
+
+        if (!combined.StartsWith(_runsRootPrefix, GetPathComparison()))
+        {
+            return null;
+        }
+
+        return combined;
+    }
+
+    private string? TryScanForRunDirectory(Guid runId, CancellationToken ct)
+    {
+        if (!Directory.Exists(_runsRootFull))
+        {
+            return null;
+        }
+
+        var name = runId.ToString("D");
+        var checkedDays = 0;
+        const int maxDaysToScan = 5000;
+
+        try
+        {
+            foreach (var yearDir in Directory.EnumerateDirectories(_runsRootFull))
+            {
+                ct.ThrowIfCancellationRequested();
+                try
+                {
+                    foreach (var monthDir in Directory.EnumerateDirectories(yearDir))
+                    {
+                        ct.ThrowIfCancellationRequested();
+                        try
+                        {
+                            foreach (var dayDir in Directory.EnumerateDirectories(monthDir))
+                            {
+                                ct.ThrowIfCancellationRequested();
+                                checkedDays++;
+                                if (checkedDays > maxDaysToScan)
+                                {
+                                    return null;
+                                }
+
+                                var candidate = Path.Combine(dayDir, name);
+                                if (!Directory.Exists(candidate))
+                                {
+                                    continue;
+                                }
+
+                                var full = Path.GetFullPath(candidate);
+                                if (full.StartsWith(_runsRootPrefix, GetPathComparison()))
+                                {
+                                    return full;
+                                }
+                            }
+                        }
+                        catch
+                        {
+                            // ignore unreadable month directory
+                        }
+                    }
+                }
+                catch
+                {
+                    // ignore unreadable year directory
+                }
+            }
+        }
+        catch
+        {
+            // ignore root enumeration issues
+        }
+
+        return null;
+    }
+
+    private async Task TryRepairIndexAsync(Guid runId, string runDirectory, CancellationToken ct)
+    {
+        var runFile = Path.Combine(runDirectory, "run.json");
+        if (!File.Exists(runFile))
+        {
+            return;
+        }
+
+        Run? record;
+        try
+        {
+            await using var stream = File.Open(runFile, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+            record = await JsonSerializer.DeserializeAsync<Run>(stream, Json, ct);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch
+        {
+            return;
+        }
+
+        if (record is null || record.RunId != runId)
+        {
+            return;
+        }
+
+        await _gate.WaitAsync(ct);
+        try
+        {
+            var entries = await ReadIndexAsync(ct);
+            if (entries.Any(e => e.RunId == runId))
+            {
+                return;
+            }
+
+            var relativeDir = Path.GetRelativePath(_runsRootFull, runDirectory);
+            if (TryGetSafeRunDirectory(relativeDir) is null)
+            {
+                return;
+            }
+
+            var indexEntry = new RunIndexEntry
+            {
+                RunId = runId,
+                CreatedAt = record.CreatedAt,
+                Cwd = record.Cwd,
+                RelativeDir = relativeDir
+            };
+            await AppendLineAsync(_indexFile, JsonSerializer.Serialize(indexEntry, Json), ct);
+        }
+        finally
+        {
+            _gate.Release();
+        }
+    }
+
+    private static string EnsureTrailingSeparator(string path)
+        => path.EndsWith(Path.DirectorySeparatorChar) ? path : path + Path.DirectorySeparatorChar;
 
     private static StringComparison GetPathComparison() =>
         OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;

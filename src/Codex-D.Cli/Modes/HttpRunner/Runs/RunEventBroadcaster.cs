@@ -6,16 +6,20 @@ namespace CodexD.HttpRunner.Runs;
 
 public sealed class RunEventBroadcaster
 {
+    // Prevent a single slow SSE client from buffering unbounded events in memory.
+    private const int MaxBufferedEventsPerSubscriber = 4096;
+
     private readonly ConcurrentDictionary<Guid, ConcurrentDictionary<long, Channel<RunEventEnvelope>>> _subs = new();
     private long _nextId;
 
     public RunEventSubscription Subscribe(Guid runId)
     {
         var id = Interlocked.Increment(ref _nextId);
-        var channel = Channel.CreateUnbounded<RunEventEnvelope>(new UnboundedChannelOptions
+        var channel = Channel.CreateBounded<RunEventEnvelope>(new BoundedChannelOptions(MaxBufferedEventsPerSubscriber)
         {
             SingleReader = true,
-            SingleWriter = false
+            SingleWriter = false,
+            FullMode = BoundedChannelFullMode.DropOldest
         });
 
         var dict = _subs.GetOrAdd(runId, _ => new ConcurrentDictionary<long, Channel<RunEventEnvelope>>());

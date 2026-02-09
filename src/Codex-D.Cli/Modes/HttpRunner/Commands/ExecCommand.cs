@@ -197,6 +197,15 @@ public sealed class ExecCommand : AsyncCommand<ExecCommand.Settings>
             Console.Out.Flush();
         }
 
+        if (follow && !sawCompletion && !cancellationToken.IsCancellationRequested)
+        {
+            if (!json)
+            {
+                Console.Error.WriteLine("Event stream ended before run.completed was received.");
+            }
+            return 1;
+        }
+
         return sawCompletion ? exitCode : 0;
     }
 

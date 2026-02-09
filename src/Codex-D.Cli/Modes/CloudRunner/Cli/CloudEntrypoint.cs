@@ -10,7 +10,7 @@ public static class CloudEntrypoint
         var app = new CommandApp();
         app.Configure(config =>
         {
-            config.SetApplicationName("codex-runner cloud");
+            config.SetApplicationName("codex-d cloud");
 
             config.AddCommand<ServeCommand>("serve")
                 .WithDescription("Run the Cloud runner (connects to CodexWebUi.Api via SignalR).");
@@ -29,7 +29,7 @@ public static class CloudEntrypoint
         if (args.Length > 0 && args[0].StartsWith("--", StringComparison.Ordinal))
         {
             AnsiConsole.MarkupLine("[red]Missing subcommand.[/]");
-            AnsiConsole.MarkupLine("Use: [grey]codex-runner cloud serve ...[/]");
+            AnsiConsole.MarkupLine("Use: [grey]codex-d cloud serve ...[/]");
             AnsiConsole.WriteLine();
             await app.RunAsync(["--help"]);
             return 2;

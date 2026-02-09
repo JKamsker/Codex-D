@@ -65,8 +65,8 @@ public static class Host
             builder.Services.AddCodexAppServerClient(options =>
             {
                 options.DefaultClientInfo = new AppServerClientInfo(
-                    name: "codex-runner-http",
-                    title: "Codex Runner (HTTP)",
+                    name: "codex-d-http",
+                    title: "CodexD (HTTP)",
                     version: typeof(Host).Assembly.GetName().Version?.ToString() ?? "0.0.0");
 
                 options.ApprovalHandler = new AlwaysDenyHandler();
@@ -148,19 +148,22 @@ public static class Host
             });
         });
 
-        app.MapGet("/v1/info", (ServerConfig cfg) =>
+        app.MapGet("/v1/info", (HttpRequest req, ServerConfig cfg) =>
         {
             var version = typeof(Host).Assembly.GetName().Version?.ToString();
+            var host = req.Host.ToUriComponent();
+            var baseUrl = string.IsNullOrWhiteSpace(host) ? cfg.BaseUrl : $"{req.Scheme}://{host}";
+            var port = req.Host.Port ?? cfg.Port;
             return Results.Ok(new
             {
                 startedAtUtc = cfg.StartedAtUtc,
                 runnerId = cfg.Identity.RunnerId,
                 version,
                 listen = cfg.ListenAddress.ToString(),
-                port = cfg.Port,
+                port,
                 requireAuth = cfg.RequireAuth,
                 stateDir = cfg.StateDirectory,
-                baseUrl = cfg.BaseUrl
+                baseUrl
             });
         });
 
@@ -314,6 +317,13 @@ public static class Host
                 var latest = await store.TryGetAsync(runId, ct);
                 if (latest is not null && IsTerminal(latest.Status))
                 {
+                    // Avoid a race where the run completes after we read the replay buffer but before we subscribe.
+                    // In that case, we may not have seen a persisted run.completed event yet; emit one derived from the latest record.
+                    await SseWriter.WriteEventAsync(
+                        ctx.Response,
+                        "run.completed",
+                        JsonSerializer.Serialize(latest, Json),
+                        ct);
                     return;
                 }
 

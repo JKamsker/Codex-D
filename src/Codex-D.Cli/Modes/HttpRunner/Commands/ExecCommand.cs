@@ -67,43 +67,60 @@ public sealed class ExecCommand : AsyncCommand<ExecCommand.Settings>
 
     public override async Task<int> ExecuteAsync(CommandContext context, Settings settings, CancellationToken cancellationToken)
     {
-        var resolved = settings.Resolve();
-
-        var isReview = settings.Prompt.Length > 0 &&
-                       string.Equals(settings.Prompt[0], "review", StringComparison.OrdinalIgnoreCase);
-
-        if (!isReview && UsesReviewOptions(settings))
+        ResolvedClientSettings resolved;
+        try
         {
-            throw new ArgumentException("Review options are only valid with `codex-runner http exec review ...`.");
+            resolved = await settings.ResolveAsync(cancellationToken);
+        }
+        catch (RunnerResolutionFailure ex)
+        {
+            Console.Error.WriteLine(ex.UserMessage);
+            return 1;
         }
 
-        var prompt = isReview ? ResolveReviewPrompt(settings) : ResolvePrompt(settings);
-
-        using var client = new RunnerClient(resolved.BaseUrl, resolved.Token);
-
-        var request = isReview
-            ? CreateReviewRequest(settings, resolved.Cwd, prompt)
-            : CreateExecRequest(settings, resolved.Cwd, prompt);
-
-        var created = await client.CreateRunAsync(request, cancellationToken);
-        var runId = created.RunId;
-        var status = created.Status;
-
-        if (settings.Json)
+        try
         {
-            WriteJsonLine(new { eventName = "run.created", runId, status });
-        }
-        else
-        {
-            AnsiConsole.MarkupLine($"RunId: [cyan]{runId:D}[/]  Status: [grey]{status}[/]");
-        }
+            var isReview = settings.Prompt.Length > 0 &&
+                           string.Equals(settings.Prompt[0], "review", StringComparison.OrdinalIgnoreCase);
 
-        if (settings.Detach)
-        {
-            return 0;
-        }
+            if (!isReview && UsesReviewOptions(settings))
+            {
+                throw new ArgumentException("Review options are only valid with `codex-d http exec review ...`.");
+            }
 
-        return await StreamAsync(client, runId, replay: true, follow: true, tail: null, json: settings.Json, cancellationToken);
+            var prompt = isReview ? ResolveReviewPrompt(settings) : ResolvePrompt(settings);
+
+            using var client = new RunnerClient(resolved.BaseUrl, resolved.Token);
+
+            var request = isReview
+                ? CreateReviewRequest(settings, resolved.Cwd, prompt)
+                : CreateExecRequest(settings, resolved.Cwd, prompt);
+
+            var created = await client.CreateRunAsync(request, cancellationToken);
+            var runId = created.RunId;
+            var status = created.Status;
+
+            if (settings.Json)
+            {
+                WriteJsonLine(new { eventName = "run.created", runId, status });
+            }
+            else
+            {
+                AnsiConsole.MarkupLine($"RunId: [cyan]{runId:D}[/]  Status: [grey]{status}[/]");
+            }
+
+            if (settings.Detach)
+            {
+                return 0;
+            }
+
+            return await StreamAsync(client, runId, replay: true, follow: true, tail: null, json: settings.Json, cancellationToken);
+        }
+        catch (ArgumentException ex)
+        {
+            Console.Error.WriteLine(ex.Message);
+            return 1;
+        }
     }
 
     private static CreateRunRequest CreateExecRequest(Settings settings, string cwd, string prompt) =>
@@ -160,7 +177,7 @@ public sealed class ExecCommand : AsyncCommand<ExecCommand.Settings>
 
     private static string ResolveReviewPrompt(Settings settings)
     {
-        // Syntax: `codex-runner http exec review [PROMPT...]`
+        // Syntax: `codex-d http exec review [PROMPT...]`
         var prompt = settings.PromptOption;
         if (string.IsNullOrWhiteSpace(prompt) && settings.Prompt.Length > 1)
         {

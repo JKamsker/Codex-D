@@ -34,12 +34,13 @@ internal sealed class RunnerHttpTestHost : IAsyncDisposable
     public static async Task<RunnerHttpTestHost> StartAsync(
         bool requireAuth,
         IRunExecutor executor,
+        int? portOverride = null,
         CancellationToken ct = default)
     {
-        var stateDir = Path.Combine(Path.GetTempPath(), "codex-runner-tests", Guid.NewGuid().ToString("N"));
+        var stateDir = Path.Combine(Path.GetTempPath(), "codex-d-tests", Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(stateDir);
 
-        var port = GetFreeTcpPort();
+        var port = portOverride ?? GetFreeTcpPort();
         var token = "test-token";
         var identity = new Identity { RunnerId = Guid.NewGuid(), CreatedAt = DateTimeOffset.UtcNow, Token = token };
 

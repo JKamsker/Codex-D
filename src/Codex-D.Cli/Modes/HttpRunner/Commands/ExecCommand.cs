@@ -146,6 +146,34 @@ public sealed class ExecCommand : AsyncCommand<ExecCommand.Settings>
                 continue;
             }
 
+            if (evt.Name == "codex.rollup.outputLine")
+            {
+                if (TryExtractRollupOutputLine(evt.Data, out var text, out var endsWithNewline, out var isControl) && !isControl)
+                {
+                    Console.Out.Write(text);
+                    if (endsWithNewline)
+                    {
+                        Console.Out.WriteLine();
+                    }
+                }
+
+                continue;
+            }
+
+            if (evt.Name == "codex.rollup.agentMessage")
+            {
+                if (TryExtractRollupAgentMessage(evt.Data, out var text))
+                {
+                    Console.Out.Write(text);
+                    if (!text.EndsWith('\n'))
+                    {
+                        Console.Out.WriteLine();
+                    }
+                }
+
+                continue;
+            }
+
             if (evt.Name == "run.completed")
             {
                 sawCompletion = true;
@@ -170,6 +198,62 @@ public sealed class ExecCommand : AsyncCommand<ExecCommand.Settings>
         }
 
         return sawCompletion ? exitCode : 0;
+    }
+
+    private static bool TryExtractRollupOutputLine(string json, out string text, out bool endsWithNewline, out bool isControl)
+    {
+        text = string.Empty;
+        endsWithNewline = false;
+        isControl = false;
+
+        try
+        {
+            using var doc = JsonDocument.Parse(json);
+            var root = doc.RootElement;
+
+            if (root.TryGetProperty("isControl", out var ctrlEl) && ctrlEl.ValueKind == JsonValueKind.True)
+            {
+                isControl = true;
+            }
+
+            if (root.TryGetProperty("endsWithNewline", out var nlEl) && nlEl.ValueKind is JsonValueKind.True or JsonValueKind.False)
+            {
+                endsWithNewline = nlEl.GetBoolean();
+            }
+
+            if (!root.TryGetProperty("text", out var t) || t.ValueKind != JsonValueKind.String)
+            {
+                return false;
+            }
+
+            text = t.GetString() ?? string.Empty;
+            return true;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    private static bool TryExtractRollupAgentMessage(string json, out string text)
+    {
+        text = string.Empty;
+        try
+        {
+            using var doc = JsonDocument.Parse(json);
+            var root = doc.RootElement;
+            if (!root.TryGetProperty("text", out var t) || t.ValueKind != JsonValueKind.String)
+            {
+                return false;
+            }
+
+            text = t.GetString() ?? string.Empty;
+            return text.Length > 0;
+        }
+        catch
+        {
+            return false;
+        }
     }
 
     private static bool TryExtractDelta(string json, out string delta)

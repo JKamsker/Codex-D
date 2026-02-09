@@ -13,6 +13,7 @@ public sealed class RunManager
 
     private readonly RunStore _store;
     private readonly RunEventBroadcaster _broadcaster;
+    private readonly RunRollupWriter _rollup;
     private readonly IRunExecutor _executor;
     private readonly CancellationToken _appStopping;
     private readonly ILogger<RunManager> _logger;
@@ -22,12 +23,14 @@ public sealed class RunManager
     public RunManager(
         RunStore store,
         RunEventBroadcaster broadcaster,
+        RunRollupWriter rollup,
         IRunExecutor executor,
         IHostApplicationLifetime lifetime,
         ILogger<RunManager> logger)
     {
         _store = store;
         _broadcaster = broadcaster;
+        _rollup = rollup;
         _executor = executor;
         _appStopping = lifetime.ApplicationStopping;
         _logger = logger;
@@ -225,8 +228,29 @@ public sealed class RunManager
             Data = json
         };
 
-        await _store.AppendEventAsync(runId, envelope, ct);
         _broadcaster.Publish(runId, envelope);
+
+        try
+        {
+            await _store.AppendRawEventAsync(runId, envelope, ct);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to persist raw run event. runId={RunId} type={Type}", runId, type);
+        }
+
+        try
+        {
+            await _rollup.OnEnvelopeAsync(runId, envelope, ct);
+            if (string.Equals(type, "run.completed", StringComparison.Ordinal))
+            {
+                await _rollup.FlushAndStopAsync(runId, envelope.CreatedAt, ct);
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to persist run rollup. runId={RunId} type={Type}", runId, type);
+        }
     }
 
     private static string NormalizeAndValidateCwd(string cwd)

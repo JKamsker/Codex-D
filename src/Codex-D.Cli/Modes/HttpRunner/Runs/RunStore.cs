@@ -11,16 +11,19 @@ public sealed class RunStore
     private readonly string _stateDirectory;
     private readonly string _runsRoot;
     private readonly string _indexFile;
+    private readonly bool _persistRawEvents;
     private readonly SemaphoreSlim _gate = new(1, 1);
 
-    public RunStore(string stateDirectory)
+    public RunStore(string stateDirectory, bool persistRawEvents = false)
     {
         _stateDirectory = stateDirectory;
         _runsRoot = StatePaths.RunsRoot(stateDirectory);
         _indexFile = StatePaths.RunsIndexFile(stateDirectory);
+        _persistRawEvents = persistRawEvents;
     }
 
     public string StateDirectory => _stateDirectory;
+    public bool PersistRawEvents => _persistRawEvents;
 
     public async Task<RunStoreCreateResult> CreateAsync(
         string cwd,
@@ -121,8 +124,13 @@ public sealed class RunStore
         }
     }
 
-    public async Task AppendEventAsync(Guid runId, RunEventEnvelope envelope, CancellationToken ct)
+    public async Task AppendRawEventAsync(Guid runId, RunEventEnvelope envelope, CancellationToken ct)
     {
+        if (!_persistRawEvents)
+        {
+            return;
+        }
+
         var dir = await TryResolveRunDirectoryAsync(runId, ct);
         if (dir is null)
         {
@@ -143,7 +151,7 @@ public sealed class RunStore
         }
     }
 
-    public async Task<IReadOnlyList<RunEventEnvelope>> ReadEventsAsync(
+    public async Task<IReadOnlyList<RunEventEnvelope>> ReadRawEventsAsync(
         Guid runId,
         int? tail,
         CancellationToken ct)
@@ -200,6 +208,91 @@ public sealed class RunStore
             else
             {
                 list!.Add(env);
+            }
+        }
+
+        return queue is not null ? queue.ToArray() : list!;
+    }
+
+    public async Task AppendRollupRecordAsync(Guid runId, RunRollupRecord record, CancellationToken ct)
+    {
+        var dir = await TryResolveRunDirectoryAsync(runId, ct);
+        if (dir is null)
+        {
+            throw new InvalidOperationException($"Unknown runId: {runId:D}");
+        }
+
+        var file = Path.Combine(dir, "rollup.jsonl");
+        var json = JsonSerializer.Serialize(record, Json);
+
+        await _gate.WaitAsync(ct);
+        try
+        {
+            await AppendLineAsync(file, json, ct);
+        }
+        finally
+        {
+            _gate.Release();
+        }
+    }
+
+    public async Task<IReadOnlyList<RunRollupRecord>> ReadRollupAsync(
+        Guid runId,
+        int? tail,
+        CancellationToken ct)
+    {
+        var dir = await TryResolveRunDirectoryAsync(runId, ct);
+        if (dir is null)
+        {
+            throw new InvalidOperationException($"Unknown runId: {runId:D}");
+        }
+
+        var file = Path.Combine(dir, "rollup.jsonl");
+        if (!File.Exists(file))
+        {
+            return Array.Empty<RunRollupRecord>();
+        }
+
+        var queue = tail is { } n && n > 0 ? new Queue<RunRollupRecord>(n) : null;
+        var list = queue is null ? new List<RunRollupRecord>() : null;
+
+        using var stream = File.Open(file, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+        using var reader = new StreamReader(stream, System.Text.Encoding.UTF8);
+
+        string? line;
+        while ((line = await reader.ReadLineAsync(ct)) is not null)
+        {
+            if (string.IsNullOrWhiteSpace(line))
+            {
+                continue;
+            }
+
+            RunRollupRecord? rec;
+            try
+            {
+                rec = JsonSerializer.Deserialize<RunRollupRecord>(line, Json);
+            }
+            catch
+            {
+                continue;
+            }
+
+            if (rec is null)
+            {
+                continue;
+            }
+
+            if (queue is not null)
+            {
+                if (queue.Count == tail)
+                {
+                    queue.Dequeue();
+                }
+                queue.Enqueue(rec);
+            }
+            else
+            {
+                list!.Add(rec);
             }
         }
 

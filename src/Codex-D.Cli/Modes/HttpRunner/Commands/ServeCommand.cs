@@ -53,6 +53,10 @@ public sealed class ServeCommand : AsyncCommand<ServeCommand.Settings>
         [CommandOption("--state-dir <DIR>")]
         [Description("Override the state directory (identity + runs). Foreground default: <cwd>/.codex-d. Daemon default: %LOCALAPPDATA%/codex-d/daemon/config")]
         public string? StateDir { get; init; }
+
+        [CommandOption("--persist-raw-events")]
+        [Description("Persist raw differential events to events.jsonl (debugging). Default: false (rollup only).")]
+        public bool PersistRawEvents { get; init; }
     }
 
     public override async Task<int> ExecuteAsync(CommandContext context, Settings settings, CancellationToken cancellationToken)
@@ -118,7 +122,8 @@ public sealed class ServeCommand : AsyncCommand<ServeCommand.Settings>
             BaseUrl = baseUrl,
             StateDirectory = stateDir,
             Identity = identity,
-            StartedAtUtc = DateTimeOffset.UtcNow
+            StartedAtUtc = DateTimeOffset.UtcNow,
+            PersistRawEvents = settings.PersistRawEvents || (TryGetEnvBool("CODEX_D_PERSIST_RAW_EVENTS") ?? false)
         };
 
         PrintBanner(config, isLoopback);
@@ -239,6 +244,11 @@ public sealed class ServeCommand : AsyncCommand<ServeCommand.Settings>
             "--require-auth"
         };
 
+        if (settings.PersistRawEvents || (TryGetEnvBool("CODEX_D_PERSIST_RAW_EVENTS") ?? false))
+        {
+            args.Add("--persist-raw-events");
+        }
+
         try
         {
             if (shouldInstall)
@@ -354,7 +364,8 @@ public sealed class ServeCommand : AsyncCommand<ServeCommand.Settings>
             BaseUrl = string.Empty,
             StateDirectory = stateDir,
             Identity = identity,
-            StartedAtUtc = DateTimeOffset.UtcNow
+            StartedAtUtc = DateTimeOffset.UtcNow,
+            PersistRawEvents = settings.PersistRawEvents || (TryGetEnvBool("CODEX_D_PERSIST_RAW_EVENTS") ?? false)
         };
 
         var app = RunnerHost.Build(config);
@@ -563,6 +574,28 @@ public sealed class ServeCommand : AsyncCommand<ServeCommand.Settings>
     {
         var raw = TrimOrNull(Environment.GetEnvironmentVariable(name));
         return int.TryParse(raw, out var i) ? i : null;
+    }
+
+    private static bool? TryGetEnvBool(string name)
+    {
+        var raw = TrimOrNull(Environment.GetEnvironmentVariable(name));
+        if (raw is null)
+        {
+            return null;
+        }
+
+        return raw.ToLowerInvariant() switch
+        {
+            "1" => true,
+            "true" => true,
+            "yes" => true,
+            "on" => true,
+            "0" => false,
+            "false" => false,
+            "no" => false,
+            "off" => false,
+            _ => null
+        };
     }
 
     private static string? TryGetEnvTokenOverride()

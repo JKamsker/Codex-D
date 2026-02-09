@@ -45,8 +45,9 @@ public static class Host
 
         builder.Services.AddSingleton(config);
 
-        builder.Services.AddSingleton(new RunStore(config.StateDirectory));
+        builder.Services.AddSingleton(new RunStore(config.StateDirectory, config.PersistRawEvents));
         builder.Services.AddSingleton<RunEventBroadcaster>();
+        builder.Services.AddSingleton<RunRollupWriter>();
 
         builder.Services.AddSingleton<RuntimeState>();
         if (enableCodexRuntime)
@@ -273,28 +274,56 @@ public static class Host
 
             tailEvents = Math.Min(tailEvents, 200000);
 
-            var events = await store.ReadEventsAsync(runId, tailEvents, ct);
-
             var queue = new Queue<object>(Math.Min(count, 50));
-            foreach (var env in events)
+
+            var dir = await store.TryResolveRunDirectoryAsync(runId, ct);
+            if (dir is not null && HasRawEventsFile(dir))
             {
-                if (!string.Equals(env.Type, "codex.notification", StringComparison.Ordinal))
+                var events = await store.ReadRawEventsAsync(runId, tailEvents, ct);
+                foreach (var env in events)
                 {
-                    continue;
-                }
+                    if (!string.Equals(env.Type, "codex.notification", StringComparison.Ordinal))
+                    {
+                        continue;
+                    }
 
-                if (!RunEventDataExtractors.TryGetCompletedAgentMessageText(env.Data, out var text) ||
-                    string.IsNullOrWhiteSpace(text))
+                    if (!RunEventDataExtractors.TryGetCompletedAgentMessageText(env.Data, out var text) ||
+                        string.IsNullOrWhiteSpace(text))
+                    {
+                        continue;
+                    }
+
+                    if (queue.Count == count)
+                    {
+                        queue.Dequeue();
+                    }
+
+                    queue.Enqueue(new { createdAt = env.CreatedAt, text });
+                }
+            }
+            else
+            {
+                var rollup = await store.ReadRollupAsync(runId, tailEvents, ct);
+                foreach (var rec in rollup)
                 {
-                    continue;
-                }
+                    if (!string.Equals(rec.Type, "agentMessage", StringComparison.Ordinal))
+                    {
+                        continue;
+                    }
 
-                if (queue.Count == count)
-                {
-                    queue.Dequeue();
-                }
+                    var text = rec.Text;
+                    if (string.IsNullOrWhiteSpace(text))
+                    {
+                        continue;
+                    }
 
-                queue.Enqueue(new { createdAt = env.CreatedAt, text });
+                    if (queue.Count == count)
+                    {
+                        queue.Dequeue();
+                    }
+
+                    queue.Enqueue(new { createdAt = rec.CreatedAt, text });
+                }
             }
 
             return Results.Ok(new { items = queue.ToArray() });
@@ -316,47 +345,106 @@ public static class Host
 
             tailEvents = Math.Min(tailEvents, 200000);
 
-            var events = await store.ReadEventsAsync(runId, tailEvents, ct);
-
             var summaries = new List<string>();
             var last = string.Empty;
             var inThinking = false;
 
-            foreach (var env in events)
+            var dir = await store.TryResolveRunDirectoryAsync(runId, ct);
+            if (dir is not null && HasRawEventsFile(dir))
             {
-                if (!string.Equals(env.Type, "codex.notification", StringComparison.Ordinal))
+                var events = await store.ReadRawEventsAsync(runId, tailEvents, ct);
+                foreach (var env in events)
                 {
-                    continue;
-                }
+                    if (!string.Equals(env.Type, "codex.notification", StringComparison.Ordinal))
+                    {
+                        continue;
+                    }
 
-                if (!RunEventDataExtractors.TryGetOutputDelta(env.Data, out var delta) ||
-                    string.IsNullOrWhiteSpace(delta))
-                {
-                    continue;
-                }
+                    if (!RunEventDataExtractors.TryGetOutputDelta(env.Data, out var delta) ||
+                        string.IsNullOrWhiteSpace(delta))
+                    {
+                        continue;
+                    }
 
-                var trimmed = delta.Trim();
-                if (string.Equals(trimmed, "thinking", StringComparison.OrdinalIgnoreCase))
-                {
-                    inThinking = true;
-                    continue;
-                }
+                    var trimmed = delta.Trim();
+                    if (string.Equals(trimmed, "thinking", StringComparison.OrdinalIgnoreCase))
+                    {
+                        inThinking = true;
+                        continue;
+                    }
 
-                if (string.Equals(trimmed, "final", StringComparison.OrdinalIgnoreCase))
-                {
-                    inThinking = false;
-                    continue;
-                }
+                    if (string.Equals(trimmed, "final", StringComparison.OrdinalIgnoreCase))
+                    {
+                        inThinking = false;
+                        continue;
+                    }
 
-                var maybeThinking = inThinking || delta.Contains("thinking", StringComparison.OrdinalIgnoreCase);
-                if (!maybeThinking)
-                {
-                    continue;
-                }
+                    var maybeThinking = inThinking || delta.Contains("thinking", StringComparison.OrdinalIgnoreCase);
+                    if (!maybeThinking)
+                    {
+                        continue;
+                    }
 
-                foreach (var rawLine in delta.Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries))
+                    foreach (var rawLine in delta.Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries))
+                    {
+                        var t = rawLine.Trim();
+                        if (!t.StartsWith("**", StringComparison.Ordinal) || !t.EndsWith("**", StringComparison.Ordinal) || t.Length <= 4)
+                        {
+                            continue;
+                        }
+
+                        var summary = t[2..^2].Trim();
+                        if (string.IsNullOrWhiteSpace(summary))
+                        {
+                            continue;
+                        }
+
+                        if (string.Equals(summary, last, StringComparison.Ordinal))
+                        {
+                            continue;
+                        }
+
+                        summaries.Add(summary);
+                        last = summary;
+                    }
+                }
+            }
+            else
+            {
+                var rollup = await store.ReadRollupAsync(runId, tailEvents, ct);
+                foreach (var rec in rollup)
                 {
-                    var t = rawLine.Trim();
+                    if (!string.Equals(rec.Type, "outputLine", StringComparison.Ordinal))
+                    {
+                        continue;
+                    }
+
+                    var text = rec.Text ?? string.Empty;
+                    if (text.Length == 0)
+                    {
+                        continue;
+                    }
+
+                    if (rec.IsControl == true)
+                    {
+                        var trimmed = text.Trim();
+                        if (string.Equals(trimmed, "thinking", StringComparison.OrdinalIgnoreCase))
+                        {
+                            inThinking = true;
+                        }
+                        else if (string.Equals(trimmed, "final", StringComparison.OrdinalIgnoreCase))
+                        {
+                            inThinking = false;
+                        }
+                        continue;
+                    }
+
+                    if (!inThinking)
+                    {
+                        continue;
+                    }
+
+                    var t = text.Trim();
                     if (!t.StartsWith("**", StringComparison.Ordinal) || !t.EndsWith("**", StringComparison.Ordinal) || t.Length <= 4)
                     {
                         continue;
@@ -395,6 +483,7 @@ public static class Host
             var replay = ParseBool(ctx.Request.Query["replay"]) ?? true;
             var follow = ParseBool(ctx.Request.Query["follow"]) ?? true;
             var tail = ParseInt(ctx.Request.Query["tail"]);
+            var replayFormat = (ctx.Request.Query["replayFormat"].ToString() ?? "auto").Trim();
 
             SseWriter.ConfigureHeaders(ctx.Response);
 
@@ -417,45 +506,83 @@ public static class Host
                 DateTimeOffset? maxReplayedAt = null;
                 var replaySawCompleted = false;
 
+                var dir = await store.TryResolveRunDirectoryAsync(runId, ct);
+                var hasRaw = dir is not null && HasRawEventsFile(dir);
+                var useRawReplay = replayFormat.Length == 0
+                    ? hasRaw
+                    : replayFormat.Trim().ToLowerInvariant() switch
+                    {
+                        "auto" => hasRaw,
+                        "raw" => true,
+                        "rollup" => false,
+                        _ => hasRaw
+                    };
+
                 if (replay)
                 {
-                    var events = await store.ReadEventsAsync(runId, tail, ct);
-                    foreach (var env in events)
+                    if (useRawReplay)
                     {
-                        if (string.Equals(env.Type, "run.meta", StringComparison.Ordinal))
+                        var events = await store.ReadRawEventsAsync(runId, tail, ct);
+                        foreach (var env in events)
                         {
-                            continue;
-                        }
+                            if (string.Equals(env.Type, "run.meta", StringComparison.Ordinal))
+                            {
+                                continue;
+                            }
 
-                        maxReplayedAt = maxReplayedAt is null || env.CreatedAt > maxReplayedAt.Value ? env.CreatedAt : maxReplayedAt;
-                        if (string.Equals(env.Type, "run.completed", StringComparison.Ordinal))
+                            maxReplayedAt = maxReplayedAt is null || env.CreatedAt > maxReplayedAt.Value ? env.CreatedAt : maxReplayedAt;
+                            if (string.Equals(env.Type, "run.completed", StringComparison.Ordinal))
+                            {
+                                replaySawCompleted = true;
+                            }
+
+                            await SseWriter.WriteEventAsync(
+                                ctx.Response,
+                                env.Type,
+                                env.Data.GetRawText(),
+                                ct);
+                        }
+                    }
+                    else
+                    {
+                        var rollup = await store.ReadRollupAsync(runId, tail, ct);
+                        foreach (var rec in rollup)
                         {
-                            replaySawCompleted = true;
-                        }
+                            var eventName = rec.Type switch
+                            {
+                                "outputLine" => "codex.rollup.outputLine",
+                                "agentMessage" => "codex.rollup.agentMessage",
+                                _ => null
+                            };
 
-                        await SseWriter.WriteEventAsync(
-                            ctx.Response,
-                            env.Type,
-                            env.Data.GetRawText(),
-                            ct);
+                            if (eventName is null)
+                            {
+                                continue;
+                            }
+
+                            await SseWriter.WriteEventAsync(
+                                ctx.Response,
+                                eventName,
+                                JsonSerializer.Serialize(rec, Json),
+                                ct);
+                        }
                     }
                 }
 
-                if (!follow || replaySawCompleted)
-                {
-                    return;
-                }
-
                 var latest = await store.TryGetAsync(runId, ct);
-                if (latest is not null && IsTerminal(latest.Status))
+                if (!replaySawCompleted && latest is not null && IsTerminal(latest.Status))
                 {
-                    // Avoid a race where the run completes after we read the replay buffer but before we subscribe.
-                    // In that case, we may not have seen a persisted run.completed event yet; emit one derived from the latest record.
+                    // Ensure the client sees a terminal event even when we only replay rollups.
                     await SseWriter.WriteEventAsync(
                         ctx.Response,
                         "run.completed",
                         JsonSerializer.Serialize(latest, Json),
                         ct);
+                    replaySawCompleted = true;
+                }
+
+                if (!follow || replaySawCompleted)
+                {
                     return;
                 }
 
@@ -483,7 +610,7 @@ public static class Host
                             continue;
                         }
 
-                        if (maxReplayedAt is not null && env.CreatedAt <= maxReplayedAt.Value)
+                        if (useRawReplay && maxReplayedAt is not null && env.CreatedAt <= maxReplayedAt.Value)
                         {
                             continue;
                         }
@@ -529,6 +656,9 @@ public static class Host
 
         return app;
     }
+
+    private static bool HasRawEventsFile(string runDirectory) =>
+        File.Exists(Path.Combine(runDirectory, "events.jsonl"));
 
     private static bool IsTerminal(string status) =>
         string.Equals(status, RunStatuses.Succeeded, StringComparison.Ordinal) ||

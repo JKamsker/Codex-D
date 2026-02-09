@@ -34,6 +34,7 @@ internal sealed class RunnerHttpTestHost : IAsyncDisposable
     public static async Task<RunnerHttpTestHost> StartAsync(
         bool requireAuth,
         IRunExecutor executor,
+        bool persistRawEvents = false,
         int? portOverride = null,
         CancellationToken ct = default)
     {
@@ -52,7 +53,8 @@ internal sealed class RunnerHttpTestHost : IAsyncDisposable
             BaseUrl = $"http://127.0.0.1:{port}",
             StateDirectory = stateDir,
             Identity = identity,
-            StartedAtUtc = DateTimeOffset.UtcNow
+            StartedAtUtc = DateTimeOffset.UtcNow,
+            PersistRawEvents = persistRawEvents
         };
 
         var app = Host.Build(

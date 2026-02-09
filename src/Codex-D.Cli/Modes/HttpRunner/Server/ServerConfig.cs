@@ -12,4 +12,6 @@ public sealed record class ServerConfig
     public required string StateDirectory { get; init; }
     public required Identity Identity { get; init; }
     public required DateTimeOffset StartedAtUtc { get; init; }
+
+    public bool PersistRawEvents { get; init; }
 }

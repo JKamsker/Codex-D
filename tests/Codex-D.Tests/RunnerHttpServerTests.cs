@@ -3,7 +3,9 @@ using System.Net.Http.Json;
 using System.Text.Json;
 using CodexD.HttpRunner.Client;
 using CodexD.HttpRunner.Contracts;
+using CodexD.HttpRunner.Runs;
 using CodexD.Shared.Paths;
+using Microsoft.Extensions.DependencyInjection;
 using Xunit;
 
 namespace CodexD.Tests;
@@ -97,7 +99,7 @@ public sealed class RunnerHttpServerTests
         }
 
         Assert.Contains(events, e => e.Name == "run.meta");
-        Assert.Contains(events, e => e.Name == "codex.notification");
+        Assert.Contains(events, e => e.Name is "codex.rollup.outputLine" or "codex.notification");
         Assert.Contains(events, e => e.Name == "run.completed");
     }
 
@@ -164,17 +166,235 @@ public sealed class RunnerHttpServerTests
         var runId = created.RunId;
         await WaitForTerminalAsync(sdk, runId, TimeSpan.FromSeconds(2));
 
-        var notif = new List<string>();
+        var lines = new List<string>();
         await foreach (var e in sdk.GetEventsAsync(runId, replay: true, follow: false, tail: 2, CancellationToken.None))
         {
-            if (e.Name == "codex.notification")
+            if (e.Name == "codex.rollup.outputLine")
             {
-                notif.Add(e.Data);
+                using var doc = JsonDocument.Parse(e.Data);
+                if (doc.RootElement.TryGetProperty("text", out var t) && t.ValueKind == JsonValueKind.String)
+                {
+                    lines.Add(t.GetString() ?? string.Empty);
+                }
             }
         }
 
-        Assert.Single(notif);
-        Assert.Contains("world", notif[0], StringComparison.Ordinal);
+        Assert.Equal(2, lines.Count);
+        Assert.Equal("world", lines[0]);
+        Assert.Equal("done", lines[1]);
+    }
+
+    [Fact]
+    public async Task Rollup_PersistsCompletedLines_AndFlushesPartialLineOnCompletion()
+    {
+        await using var host = await RunnerHttpTestHost.StartAsync(requireAuth: false, new PartialLineExecutor());
+        using var sdk = host.CreateSdkClient(includeToken: false);
+
+        var cwd = Path.Combine(host.StateDir, "repo");
+        Directory.CreateDirectory(cwd);
+
+        var created = await sdk.CreateRunAsync(new CreateRunRequest { Cwd = cwd, Prompt = "hi", Model = null, Sandbox = null, ApprovalPolicy = "never" }, CancellationToken.None);
+        var runId = created.RunId;
+        await WaitForTerminalAsync(sdk, runId, TimeSpan.FromSeconds(2));
+
+        var store = host.App.Services.GetRequiredService<RunStore>();
+        var dir = await store.TryResolveRunDirectoryAsync(runId, CancellationToken.None);
+        Assert.NotNull(dir);
+        Assert.True(File.Exists(Path.Combine(dir!, "rollup.jsonl")));
+        Assert.False(File.Exists(Path.Combine(dir!, "events.jsonl"))); // default is rollup-only
+
+        var rollup = await store.ReadRollupAsync(runId, tail: null, CancellationToken.None);
+        Assert.Contains(rollup, r => r.Type == "outputLine" && r.Text == "partial" && r.EndsWithNewline == false);
+    }
+
+    [Fact]
+    public async Task Rollup_SplitsCrLfIntoDistinctOutputLines()
+    {
+        await using var host = await RunnerHttpTestHost.StartAsync(requireAuth: false, new CrLfExecutor());
+        using var sdk = host.CreateSdkClient(includeToken: false);
+
+        var cwd = Path.Combine(host.StateDir, "repo");
+        Directory.CreateDirectory(cwd);
+
+        var created = await sdk.CreateRunAsync(new CreateRunRequest { Cwd = cwd, Prompt = "hi", Model = null, Sandbox = null, ApprovalPolicy = "never" }, CancellationToken.None);
+        var runId = created.RunId;
+        await WaitForTerminalAsync(sdk, runId, TimeSpan.FromSeconds(2));
+
+        var store = host.App.Services.GetRequiredService<RunStore>();
+        var rollup = await store.ReadRollupAsync(runId, tail: null, CancellationToken.None);
+
+        var lines = rollup
+            .Where(r => r.Type == "outputLine" && r.IsControl != true)
+            .Select(r => r.Text)
+            .ToList();
+
+        Assert.Equal(["a", "b"], lines);
+    }
+
+    [Fact]
+    public async Task Rollup_PersistsThinkingAndFinalMarkers_AsControlOutputLines()
+    {
+        await using var host = await RunnerHttpTestHost.StartAsync(requireAuth: false, new MessagesAndThinkingExecutor());
+        using var sdk = host.CreateSdkClient(includeToken: false);
+
+        var cwd = Path.Combine(host.StateDir, "repo");
+        Directory.CreateDirectory(cwd);
+
+        var created = await sdk.CreateRunAsync(new CreateRunRequest { Cwd = cwd, Prompt = "hi", Model = null, Sandbox = null, ApprovalPolicy = "never" }, CancellationToken.None);
+        var runId = created.RunId;
+        await WaitForTerminalAsync(sdk, runId, TimeSpan.FromSeconds(2));
+
+        var store = host.App.Services.GetRequiredService<RunStore>();
+        var rollup = await store.ReadRollupAsync(runId, tail: null, CancellationToken.None);
+
+        Assert.Contains(rollup, r => r.Type == "outputLine" && r.IsControl == true && string.Equals(r.Text, "thinking", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(rollup, r => r.Type == "outputLine" && r.IsControl == true && string.Equals(r.Text, "final", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(rollup, r => r.Type == "outputLine" && r.IsControl != true && r.Text == "**Phase 1**");
+        Assert.Contains(rollup, r => r.Type == "outputLine" && r.IsControl != true && r.Text == "**Phase 2**");
+    }
+
+    [Fact]
+    public async Task Rollup_DoesNotPersistPlanDeltas_WhenNoSupportedNotificationsExist()
+    {
+        await using var host = await RunnerHttpTestHost.StartAsync(requireAuth: false, new PlanOnlyExecutor());
+        using var sdk = host.CreateSdkClient(includeToken: false);
+
+        var cwd = Path.Combine(host.StateDir, "repo");
+        Directory.CreateDirectory(cwd);
+
+        var created = await sdk.CreateRunAsync(new CreateRunRequest { Cwd = cwd, Prompt = "hi", Model = null, Sandbox = null, ApprovalPolicy = "never" }, CancellationToken.None);
+        var runId = created.RunId;
+        await WaitForTerminalAsync(sdk, runId, TimeSpan.FromSeconds(2));
+
+        var store = host.App.Services.GetRequiredService<RunStore>();
+        var dir = await store.TryResolveRunDirectoryAsync(runId, CancellationToken.None);
+        Assert.NotNull(dir);
+
+        Assert.False(File.Exists(Path.Combine(dir!, "rollup.jsonl")));
+    }
+
+    [Fact]
+    public async Task Sse_ReplayRollupThenFollow_StreamsBothRollupAndDifferentialEvents()
+    {
+        var exec = new CoordinatedExecutor();
+        await using var host = await RunnerHttpTestHost.StartAsync(requireAuth: false, exec);
+        using var sdk = host.CreateSdkClient(includeToken: false);
+
+        var cwd = Path.Combine(host.StateDir, "repo");
+        Directory.CreateDirectory(cwd);
+
+        var created = await sdk.CreateRunAsync(new CreateRunRequest { Cwd = cwd, Prompt = "hi", Model = null, Sandbox = null, ApprovalPolicy = "never" }, CancellationToken.None);
+        var runId = created.RunId;
+
+        await exec.FirstPublished.Task; // ensure we have replayable rollup content before attaching
+
+        var seen = new List<SseEvent>();
+        var sawReplay = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+
+        var consumeTask = Task.Run(async () =>
+        {
+            await foreach (var e in sdk.GetEventsAsync(runId, replay: true, follow: true, tail: null, cts.Token))
+            {
+                seen.Add(e);
+                if (e.Name == "codex.rollup.outputLine")
+                {
+                    sawReplay.TrySetResult();
+                }
+
+                if (e.Name == "run.completed")
+                {
+                    break;
+                }
+            }
+        }, cts.Token);
+
+        await Task.WhenAny(sawReplay.Task, Task.Delay(TimeSpan.FromSeconds(2), cts.Token));
+        Assert.True(sawReplay.Task.IsCompleted);
+
+        exec.AllowContinue.TrySetResult();
+        await consumeTask;
+
+        Assert.Contains(seen, e => e.Name == "codex.rollup.outputLine");
+        Assert.Contains(seen, e => e.Name == "codex.notification");
+        Assert.Contains(seen, e => e.Name == "run.completed");
+    }
+
+    [Fact]
+    public async Task Sse_ReplayFormat_Auto_PrefersRaw_WhenRawEventsArePersisted()
+    {
+        await using var host = await RunnerHttpTestHost.StartAsync(requireAuth: false, new ImmediateSuccessExecutor(), persistRawEvents: true);
+        using var sdk = host.CreateSdkClient(includeToken: false);
+
+        var cwd = Path.Combine(host.StateDir, "repo");
+        Directory.CreateDirectory(cwd);
+
+        var created = await sdk.CreateRunAsync(new CreateRunRequest { Cwd = cwd, Prompt = "hi", Model = null, Sandbox = null, ApprovalPolicy = "never" }, CancellationToken.None);
+        var runId = created.RunId;
+        await WaitForTerminalAsync(sdk, runId, TimeSpan.FromSeconds(2));
+
+        var store = host.App.Services.GetRequiredService<RunStore>();
+        var dir = await store.TryResolveRunDirectoryAsync(runId, CancellationToken.None);
+        Assert.NotNull(dir);
+        Assert.True(File.Exists(Path.Combine(dir!, "events.jsonl")));
+        Assert.True(File.Exists(Path.Combine(dir!, "rollup.jsonl")));
+
+        var events = new List<SseEvent>();
+        await foreach (var e in sdk.GetEventsAsync(runId, replay: true, follow: false, tail: null, replayFormat: "auto", CancellationToken.None))
+        {
+            events.Add(e);
+        }
+
+        Assert.Contains(events, e => e.Name == "codex.notification");
+        Assert.DoesNotContain(events, e => e.Name == "codex.rollup.outputLine");
+        Assert.Contains(events, e => e.Name == "run.completed");
+    }
+
+    [Fact]
+    public async Task Sse_ReplayFormat_Rollup_OverridesRaw_WhenRawEventsArePersisted()
+    {
+        await using var host = await RunnerHttpTestHost.StartAsync(requireAuth: false, new ImmediateSuccessExecutor(), persistRawEvents: true);
+        using var sdk = host.CreateSdkClient(includeToken: false);
+
+        var cwd = Path.Combine(host.StateDir, "repo");
+        Directory.CreateDirectory(cwd);
+
+        var created = await sdk.CreateRunAsync(new CreateRunRequest { Cwd = cwd, Prompt = "hi", Model = null, Sandbox = null, ApprovalPolicy = "never" }, CancellationToken.None);
+        var runId = created.RunId;
+        await WaitForTerminalAsync(sdk, runId, TimeSpan.FromSeconds(2));
+
+        var events = new List<SseEvent>();
+        await foreach (var e in sdk.GetEventsAsync(runId, replay: true, follow: false, tail: null, replayFormat: "rollup", CancellationToken.None))
+        {
+            events.Add(e);
+        }
+
+        Assert.Contains(events, e => e.Name == "codex.rollup.outputLine");
+        Assert.DoesNotContain(events, e => e.Name == "codex.notification");
+        Assert.Contains(events, e => e.Name == "run.completed");
+    }
+
+    [Fact]
+    public async Task Sse_ReplayFormat_Raw_StillEmitsRunCompleted_WhenRawMissing()
+    {
+        await using var host = await RunnerHttpTestHost.StartAsync(requireAuth: false, new ImmediateSuccessExecutor(), persistRawEvents: false);
+        using var sdk = host.CreateSdkClient(includeToken: false);
+
+        var cwd = Path.Combine(host.StateDir, "repo");
+        Directory.CreateDirectory(cwd);
+
+        var created = await sdk.CreateRunAsync(new CreateRunRequest { Cwd = cwd, Prompt = "hi", Model = null, Sandbox = null, ApprovalPolicy = "never" }, CancellationToken.None);
+        var runId = created.RunId;
+        await WaitForTerminalAsync(sdk, runId, TimeSpan.FromSeconds(2));
+
+        var events = new List<SseEvent>();
+        await foreach (var e in sdk.GetEventsAsync(runId, replay: true, follow: false, tail: null, replayFormat: "raw", CancellationToken.None))
+        {
+            events.Add(e);
+        }
+
+        Assert.DoesNotContain(events, e => e.Name == "codex.notification");
+        Assert.Contains(events, e => e.Name == "run.completed");
     }
 
     [Fact]

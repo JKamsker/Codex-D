@@ -207,6 +207,20 @@ public sealed class RunnerClient : IDisposable
         int? tail,
         [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct)
     {
+        await foreach (var evt in GetEventsAsync(runId, replay, follow, tail, replayFormat: null, ct))
+        {
+            yield return evt;
+        }
+    }
+
+    public async IAsyncEnumerable<SseEvent> GetEventsAsync(
+        Guid runId,
+        bool replay,
+        bool follow,
+        int? tail,
+        string? replayFormat,
+        [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct)
+    {
         var query = new List<string>
         {
             $"replay={(replay ? "true" : "false")}",
@@ -215,6 +229,10 @@ public sealed class RunnerClient : IDisposable
         if (tail is { } n && n > 0)
         {
             query.Add($"tail={n}");
+        }
+        if (!string.IsNullOrWhiteSpace(replayFormat))
+        {
+            query.Add($"replayFormat={Uri.EscapeDataString(replayFormat.Trim())}");
         }
 
         var url = $"{_baseUrl}/v1/runs/{runId:D}/events?{string.Join("&", query)}";

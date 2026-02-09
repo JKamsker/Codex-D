@@ -49,6 +49,14 @@ jobs:
       - name: Pack (.NET tool)
         run: dotnet pack src/Codex-D.Cli/Codex-D.Cli.csproj --no-build -c Release -o out/nuget /p:Version="${{ env.VERSION }}"
 
+      - name: Publish (self-contained win-x64)
+        shell: bash
+        run: |
+          dotnet publish src/Codex-D.Cli/Codex-D.Cli.csproj -c Release -r win-x64 --self-contained true --no-restore -o out/sc /p:Version="${{ env.VERSION }}" /p:PublishSingleFile=true
+          exe="$(ls -1 out/sc/*.exe | head -n 1)"
+          mv "$exe" out/sc/codex-d.exe
+          (cd out/sc && zip -r ../codex-d-win-x64.zip codex-d.exe)
+
       - name: Upload publish output
         uses: actions/upload-artifact@v4
         with:
@@ -60,6 +68,12 @@ jobs:
         with:
           name: nuget-package
           path: out/nuget/
+
+      - name: Upload release assets
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-assets
+          path: out/codex-d-win-x64.zip
 
   nuget-upload:
     needs: build
@@ -84,3 +98,59 @@ jobs:
         run: |
           dotnet nuget push "nuget-packages/*.nupkg" --api-key "$NUGET_API_KEY" --source https://api.nuget.org/v3/index.json --skip-duplicate
           echo "Version: ${{ needs.build.outputs.version }}"
+
+  github-release:
+    needs: build
+    if: github.event_name == 'push' && (github.ref == 'refs/heads/master' || startsWith(github.ref, 'refs/tags/v'))
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download release assets
+        uses: actions/download-artifact@v4
+        with:
+          name: release-assets
+          path: release-assets
+
+      - name: Compute release metadata
+        id: release-meta
+        shell: bash
+        run: |
+          if [[ "${GITHUB_REF_TYPE}" == "tag" ]]; then
+            echo "tag=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
+            echo "name=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
+            echo "prerelease=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "tag=nightly" >> "$GITHUB_OUTPUT"
+            echo "name=Nightly" >> "$GITHUB_OUTPUT"
+            echo "prerelease=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Move nightly tag
+        if: steps.release-meta.outputs.tag == 'nightly'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            const sha = context.sha;
+            const ref = 'tags/nightly';
+
+            try {
+              await github.rest.git.updateRef({ owner, repo, ref, sha, force: true });
+            } catch (e) {
+              if (e.status === 404) {
+                await github.rest.git.createRef({ owner, repo, ref: 'refs/tags/nightly', sha });
+              } else {
+                throw e;
+              }
+            }
+
+      - name: Create/update GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.release-meta.outputs.tag }}
+          name: ${{ steps.release-meta.outputs.name }}
+          prerelease: ${{ steps.release-meta.outputs.prerelease }}
+          generate_release_notes: true
+          files: release-assets/*.zip

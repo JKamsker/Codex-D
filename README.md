@@ -12,7 +12,16 @@ Examples below assume a `codex-d` shim/binary is available; with `dotnet run`, i
 
 ---
 
-## Install (global tool)
+## Install (Windows)
+
+```powershell
+irm https://raw.githubusercontent.com/JKamsker/Codex-D/refs/heads/master/scripts/installer.ps1 | iex
+```
+
+Installs to `%LOCALAPPDATA%\codex-d\bin` and adds it to your **user PATH**.
+Open a new terminal and run `codex-d --help`.
+
+## Install (global tool, requires .NET 10)
 
 ```bash
 dotnet tool install -g CodexD

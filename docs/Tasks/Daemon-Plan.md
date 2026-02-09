@@ -365,14 +365,14 @@ Command-line flags always win over env vars.
 
 ### G) Documentation updates
 
-* [ ] Update CLI README/help text:
+* [x] Update CLI README/help text:
 
-  * [ ] Mention daemon mode (Windows-only).
-  * [ ] Explain default state dirs:
+  * [x] Mention daemon mode (Windows-only).
+  * [x] Explain default state dirs:
 
-    * [ ] daemon in LocalAppData
-    * [ ] foreground in `.codex-d` under CWD
-  * [ ] Explain client resolution preference (daemon-first).
+    * [x] daemon in LocalAppData
+    * [x] foreground in `.codex-d` under CWD
+  * [x] Explain client resolution preference (daemon-first).
 
 ### H) Tests
 
@@ -394,15 +394,15 @@ Command-line flags always win over env vars.
 
 ## Acceptance Criteria (Iteration 1)
 
-* [ ] `codex-d http serve` starts a foreground server using `<cwd>\.codex-d` by default.
-* [ ] `codex-d http serve -d` on Windows starts a detached daemon server, writes runtime file, and returns control to the terminal.
-* [ ] Any client command without `--url`:
+* [x] `codex-d http serve` starts a foreground server using `<cwd>\.codex-d` by default.
+* [x] `codex-d http serve -d` on Windows starts a detached daemon server, writes runtime file, and returns control to the terminal.
+* [x] Any client command without `--url`:
 
-  * [ ] prefers daemon if available,
-  * [ ] else tries `http://127.0.0.1:8787`,
-  * [ ] else errors with “start daemon” instruction (no auto-start).
-* [ ] No shared state dir between daemon and foreground by default.
-* [ ] Works even if daemon requires auth (client can read token from daemon identity when not provided explicitly).
+  * [x] prefers daemon if available,
+  * [x] else tries `http://127.0.0.1:8787`,
+  * [x] else errors with “start daemon” instruction (no auto-start).
+* [x] No shared state dir between daemon and foreground by default.
+* [x] Works even if daemon requires auth (client can read token from daemon identity when not provided explicitly).
 
 ---
 

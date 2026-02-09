@@ -43,7 +43,7 @@ public sealed class ServeCommand : AsyncCommand<ServeCommand.Settings>
         public string? Token { get; init; }
 
         [CommandOption("--state-dir <DIR>")]
-        [Description("Override the state directory (identity + runs).")]
+        [Description("Override the state directory (identity + runs). Foreground default: <cwd>/.codex-d. Daemon default: %LOCALAPPDATA%/codex-d/daemon/config")]
         public string? StateDir { get; init; }
     }
 

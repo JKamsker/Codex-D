@@ -6,6 +6,7 @@ using CodexD.Shared.Paths;
 using CodexD.HttpRunner.Runs;
 using JKToolKit.CodexSDK.AppServer;
 using JKToolKit.CodexSDK.AppServer.ApprovalHandlers;
+using JKToolKit.CodexSDK.AppServer.Resiliency;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
@@ -142,11 +143,21 @@ public static class Host
                 });
             }
 
-            var ready = state.TryGetClient() is not null;
+            var client = state.TryGetClient();
+            var codexRuntime = client is null
+                ? "starting"
+                : client.State switch
+                {
+                    CodexAppServerConnectionState.Connected => "ready",
+                    CodexAppServerConnectionState.Restarting => "restarting",
+                    CodexAppServerConnectionState.Faulted => "faulted",
+                    CodexAppServerConnectionState.Disposed => "disposed",
+                    _ => "unknown"
+                };
             return Results.Ok(new
             {
                 status = "ok",
-                codexRuntime = ready ? "ready" : "starting"
+                codexRuntime
             });
         });
 
@@ -263,6 +274,22 @@ public static class Host
         {
             var ok = await runs.TryInterruptAsync(runId, ct);
             return ok ? Results.Accepted() : Results.NotFound(new { error = "not_found_or_not_running" });
+        });
+
+        app.MapPost("/v1/runs/{runId:guid}/stop", async (Guid runId, RunManager runs, CancellationToken ct) =>
+        {
+            var ok = await runs.TryStopAsync(runId, ct);
+            return ok ? Results.Accepted() : Results.NotFound(new { error = "not_found_or_not_running" });
+        });
+
+        app.MapPost("/v1/runs/{runId:guid}/resume", async (Guid runId, ResumeRunRequest? request, RunManager runs, CancellationToken ct) =>
+        {
+            var prompt = string.IsNullOrWhiteSpace(request?.Prompt) ? "continue" : request!.Prompt!.Trim();
+
+            var resumed = await runs.ResumeAsync(runId, prompt, ct);
+            return resumed is null
+                ? Results.NotFound(new { error = "not_found_or_not_resumable" })
+                : Results.Ok(new { runId = resumed.RunId, status = resumed.Status });
         });
 
         app.MapGet("/v1/runs/{runId:guid}/messages", async (Guid runId, HttpRequest req, RunStore store, CancellationToken ct) =>
@@ -556,7 +583,7 @@ public static class Host
                     ct);
 
                 DateTimeOffset? maxReplayedAt = null;
-                var replaySawCompleted = false;
+                string? lastReplayedType = null;
 
                 var dir = await store.TryResolveRunDirectoryAsync(runId, ct);
                 var hasRaw = dir is not null && HasRawEventsFile(dir);
@@ -585,10 +612,7 @@ public static class Host
                                 }
 
                                 maxReplayedAt = maxReplayedAt is null || env.CreatedAt > maxReplayedAt.Value ? env.CreatedAt : maxReplayedAt;
-                                if (string.Equals(env.Type, "run.completed", StringComparison.Ordinal))
-                                {
-                                    replaySawCompleted = true;
-                                }
+                                lastReplayedType = env.Type;
 
                                 await SseWriter.WriteEventAsync(
                                     ctx.Response,
@@ -607,10 +631,7 @@ public static class Host
                                 }
 
                                 maxReplayedAt = maxReplayedAt is null || env.CreatedAt > maxReplayedAt.Value ? env.CreatedAt : maxReplayedAt;
-                                if (string.Equals(env.Type, "run.completed", StringComparison.Ordinal))
-                                {
-                                    replaySawCompleted = true;
-                                }
+                                lastReplayedType = env.Type;
 
                                 await SseWriter.WriteEventAsync(
                                     ctx.Response,
@@ -673,25 +694,33 @@ public static class Host
                 }
 
                 var latest = await store.TryGetAsync(runId, ct);
-                if (!replaySawCompleted && latest is not null && IsTerminal(latest.Status))
+                if (latest is not null && IsTerminal(latest.Status))
                 {
                     // Ensure the client sees a terminal event even when we only replay rollups.
-                    await SseWriter.WriteEventAsync(
-                        ctx.Response,
-                        "run.completed",
-                        JsonSerializer.Serialize(latest, Json),
-                        ct);
-                    replaySawCompleted = true;
+                    var terminalEventName = string.Equals(latest.Status, RunStatuses.Paused, StringComparison.Ordinal)
+                        ? "run.paused"
+                        : "run.completed";
+
+                    if (!useRawReplay || !string.Equals(lastReplayedType, terminalEventName, StringComparison.Ordinal))
+                    {
+                        await SseWriter.WriteEventAsync(
+                            ctx.Response,
+                            terminalEventName,
+                            JsonSerializer.Serialize(latest, Json),
+                            ct);
+                    }
+
+                    return;
                 }
 
-                if (!follow || replaySawCompleted)
+                if (!follow)
                 {
                     return;
                 }
 
                 if (sub is null)
                 {
-                    return;
+                    sub = broadcaster.Subscribe(runId);
                 }
 
                 using var pingCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
@@ -724,7 +753,8 @@ public static class Host
                             env.Data.GetRawText(),
                             ct);
 
-                        if (string.Equals(env.Type, "run.completed", StringComparison.Ordinal))
+                        if (string.Equals(env.Type, "run.completed", StringComparison.Ordinal) ||
+                            string.Equals(env.Type, "run.paused", StringComparison.Ordinal))
                         {
                             break;
                         }
@@ -766,6 +796,7 @@ public static class Host
     private static bool IsTerminal(string status) =>
         string.Equals(status, RunStatuses.Succeeded, StringComparison.Ordinal) ||
         string.Equals(status, RunStatuses.Failed, StringComparison.Ordinal) ||
+        string.Equals(status, RunStatuses.Paused, StringComparison.Ordinal) ||
         string.Equals(status, RunStatuses.Interrupted, StringComparison.Ordinal);
 
     private static bool? ParseBool(string value) =>

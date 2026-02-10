@@ -171,6 +171,105 @@ public sealed class RunnerHttpServerTests
     }
 
     [Fact]
+    public async Task Stop_PausesRun_AndEmitsRunPaused()
+    {
+        var exec = new CoordinatedExecutor();
+        await using var host = await RunnerHttpTestHost.StartAsync(requireAuth: false, exec);
+        using var sdk = host.CreateSdkClient(includeToken: false);
+
+        var cwd = Path.Combine(host.StateDir, "repo");
+        Directory.CreateDirectory(cwd);
+
+        var created = await sdk.CreateRunAsync(new CreateRunRequest { Cwd = cwd, Prompt = "hi", Model = null, Sandbox = null, ApprovalPolicy = "never" }, CancellationToken.None);
+        var runId = created.RunId;
+
+        await exec.FirstPublished.Task;
+
+        await sdk.StopAsync(runId, CancellationToken.None);
+
+        await WaitForEventAsync(sdk, runId, "run.paused", TimeSpan.FromSeconds(5));
+
+        var run = await sdk.GetRunAsync(runId, CancellationToken.None);
+        Assert.Equal(RunStatuses.Paused, run.Status);
+    }
+
+    [Fact]
+    public async Task Resume_RestartsExecution_AndCompletes()
+    {
+        var exec = new StopThenSucceedExecutor();
+        await using var host = await RunnerHttpTestHost.StartAsync(requireAuth: false, exec);
+        using var sdk = host.CreateSdkClient(includeToken: false);
+
+        var cwd = Path.Combine(host.StateDir, "repo");
+        Directory.CreateDirectory(cwd);
+
+        var created = await sdk.CreateRunAsync(new CreateRunRequest { Cwd = cwd, Prompt = "hi", Model = null, Sandbox = null, ApprovalPolicy = "never" }, CancellationToken.None);
+        var runId = created.RunId;
+
+        await exec.FirstStarted.Task;
+
+        await sdk.StopAsync(runId, CancellationToken.None);
+        await WaitForEventAsync(sdk, runId, "run.paused", TimeSpan.FromSeconds(5));
+
+        await sdk.ResumeAsync(runId, prompt: "continue", CancellationToken.None);
+        await WaitForEventAsync(sdk, runId, "run.completed", TimeSpan.FromSeconds(5));
+
+        var completed = await sdk.GetRunAsync(runId, CancellationToken.None);
+        Assert.Equal(RunStatuses.Succeeded, completed.Status);
+    }
+
+    [Fact]
+    public async Task Sse_RawReplay_DoesNotTreatHistoricalRunPausedAsTerminalAfterResume()
+    {
+        var exec = new StopThenBlockThenSucceedExecutor();
+        await using var host = await RunnerHttpTestHost.StartAsync(requireAuth: false, exec, persistRawEvents: true);
+        using var sdk = host.CreateSdkClient(includeToken: false);
+
+        var cwd = Path.Combine(host.StateDir, "repo");
+        Directory.CreateDirectory(cwd);
+
+        var created = await sdk.CreateRunAsync(new CreateRunRequest { Cwd = cwd, Prompt = "hi", Model = null, Sandbox = null, ApprovalPolicy = "never" }, CancellationToken.None);
+        var runId = created.RunId;
+
+        await exec.FirstStarted.Task;
+
+        await sdk.StopAsync(runId, CancellationToken.None);
+        await WaitForEventAsync(sdk, runId, "run.paused", TimeSpan.FromSeconds(5));
+
+        await sdk.ResumeAsync(runId, prompt: "continue", CancellationToken.None);
+        await exec.SecondStarted.Task;
+
+        var attached = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var sawCompleted = false;
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+
+        var consumeTask = Task.Run(async () =>
+        {
+            await foreach (var e in sdk.GetEventsAsync(runId, replay: true, follow: true, tail: null, cts.Token))
+            {
+                if (e.Name == "run.meta")
+                {
+                    attached.TrySetResult();
+                }
+
+                if (e.Name == "run.completed")
+                {
+                    sawCompleted = true;
+                    break;
+                }
+            }
+        }, cts.Token);
+
+        await Task.WhenAny(attached.Task, Task.Delay(TimeSpan.FromSeconds(2), cts.Token));
+        Assert.True(attached.Task.IsCompleted);
+
+        exec.AllowFinish.TrySetResult();
+
+        await consumeTask;
+        Assert.True(sawCompleted);
+    }
+
+    [Fact]
     public async Task Sse_Tail_RejectsInvalidValues()
     {
         await using var host = await RunnerHttpTestHost.StartAsync(requireAuth: false, new ImmediateSuccessExecutor());
@@ -634,6 +733,28 @@ public sealed class RunnerHttpServerTests
         Assert.Contains("Phase 1", items);
         Assert.Contains("Phase 2", items);
         Assert.DoesNotContain("ignored", items);
+    }
+
+    private static async Task WaitForEventAsync(RunnerClient client, Guid runId, string eventName, TimeSpan timeout)
+    {
+        using var cts = new CancellationTokenSource(timeout);
+
+        try
+        {
+            await foreach (var e in client.GetEventsAsync(runId, replay: true, follow: true, tail: null, cts.Token))
+            {
+                if (e.Name == eventName)
+                {
+                    return;
+                }
+            }
+        }
+        catch (OperationCanceledException) when (cts.IsCancellationRequested)
+        {
+            throw new TimeoutException($"Did not observe {eventName} for {runId:D} within {timeout}.");
+        }
+
+        throw new TimeoutException($"Did not observe {eventName} for {runId:D} within {timeout}.");
     }
 
     private static async Task WaitForTerminalAsync(RunnerClient client, Guid runId, TimeSpan timeout)

@@ -29,16 +29,34 @@ public sealed class CodexAppServerRunExecutor : IRunExecutor
         var sandbox = ResolveSandboxOrDefault(context.Sandbox);
         var approvalPolicy = ResolveApprovalPolicyOrDefault(context.ApprovalPolicy);
 
-        var threadOptions = new ThreadStartOptions
+        CodexThread thread;
+        if (!string.IsNullOrWhiteSpace(context.CodexThreadId))
         {
-            Cwd = context.Cwd,
-            Model = model,
-            Sandbox = sandbox,
-            ApprovalPolicy = approvalPolicy,
-            Ephemeral = true
-        };
+            thread = await client.ResumeThreadAsync(
+                new ThreadResumeOptions
+                {
+                    ThreadId = context.CodexThreadId,
+                    Cwd = context.Cwd,
+                    Model = model,
+                    ApprovalPolicy = approvalPolicy,
+                    Sandbox = sandbox
+                },
+                ct);
+        }
+        else
+        {
+            thread = await client.StartThreadAsync(
+                new ThreadStartOptions
+                {
+                    Cwd = context.Cwd,
+                    Model = model,
+                    Sandbox = sandbox,
+                    ApprovalPolicy = approvalPolicy,
+                    Ephemeral = false
+                },
+                ct);
+        }
 
-        var thread = await client.StartThreadAsync(threadOptions, ct);
         await context.SetCodexIdsAsync(thread.Id, null, ct);
 
         await using var turn = await client.StartTurnAsync(

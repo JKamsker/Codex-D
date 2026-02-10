@@ -1,25 +1,25 @@
-using JKToolKit.CodexSDK.AppServer;
+using JKToolKit.CodexSDK.AppServer.Resiliency;
 
 namespace CodexD.HttpRunner.CodexRuntime;
 
 public sealed class RuntimeState : IAppServerClientProvider
 {
     private readonly object _lock = new();
-    private CodexAppServerClient? _client;
-    private TaskCompletionSource<CodexAppServerClient> _readyTcs = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    private ResilientCodexAppServerClient? _client;
+    private TaskCompletionSource<ResilientCodexAppServerClient> _readyTcs = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
-    public ValueTask<CodexAppServerClient> GetClientAsync(CancellationToken ct = default)
+    public ValueTask<ResilientCodexAppServerClient> GetClientAsync(CancellationToken ct = default)
     {
-        Task<CodexAppServerClient> task;
+        Task<ResilientCodexAppServerClient> task;
         lock (_lock)
         {
             task = _client is not null ? Task.FromResult(_client) : _readyTcs.Task;
         }
 
-        return new ValueTask<CodexAppServerClient>(task.WaitAsync(ct));
+        return new ValueTask<ResilientCodexAppServerClient>(task.WaitAsync(ct));
     }
 
-    public CodexAppServerClient? TryGetClient()
+    public ResilientCodexAppServerClient? TryGetClient()
     {
         lock (_lock)
         {
@@ -27,7 +27,7 @@ public sealed class RuntimeState : IAppServerClientProvider
         }
     }
 
-    public void SetClient(CodexAppServerClient client)
+    public void SetClient(ResilientCodexAppServerClient client)
     {
         ArgumentNullException.ThrowIfNull(client);
 
@@ -38,7 +38,7 @@ public sealed class RuntimeState : IAppServerClientProvider
         }
     }
 
-    public void ClearClient(CodexAppServerClient? client)
+    public void ClearClient(ResilientCodexAppServerClient? client)
     {
         lock (_lock)
         {
@@ -50,7 +50,7 @@ public sealed class RuntimeState : IAppServerClientProvider
             if (client is null || ReferenceEquals(_client, client))
             {
                 _client = null;
-                _readyTcs = new TaskCompletionSource<CodexAppServerClient>(TaskCreationOptions.RunContinuationsAsynchronously);
+                _readyTcs = new TaskCompletionSource<ResilientCodexAppServerClient>(TaskCreationOptions.RunContinuationsAsynchronously);
             }
         }
     }

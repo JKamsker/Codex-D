@@ -67,7 +67,7 @@ public sealed class RunThinkingCommand : AsyncCommand<RunThinkingCommand.Setting
         }
         catch (Exception ex)
         {
-            AnsiConsole.MarkupLine($"[red]Failed to fetch thinking summaries:[/] {ex.Message}");
+            AnsiConsole.MarkupLine($"[red]Failed to fetch thinking summaries:[/] {Markup.Escape(ex.Message ?? string.Empty)}");
             return 1;
         }
 
@@ -97,4 +97,3 @@ public sealed class RunThinkingCommand : AsyncCommand<RunThinkingCommand.Setting
         Console.Out.WriteLine(json);
     }
 }
-

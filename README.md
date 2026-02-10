@@ -120,6 +120,18 @@ codex-d http run interrupt <RUN_ID>
 codex-d http run interrupt --last
 ```
 
+Pause (stop) a running exec run so it can be resumed:
+
+```bash
+codex-d http run stop <RUN_ID>
+```
+
+Resume a paused exec run (default prompt: "continue"):
+
+```bash
+codex-d http run resume <RUN_ID>
+```
+
 Inspect a run’s output artifacts:
 
 ```bash

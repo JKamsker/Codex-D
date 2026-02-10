@@ -190,6 +190,23 @@ public sealed class ExecCommand : AsyncCommand<ExecCommand.Settings>
 
                 continue;
             }
+
+            if (evt.Name == "run.paused")
+            {
+                sawCompletion = true;
+                if (TryExtractStatus(evt.Data, out var status))
+                {
+                    Console.Out.WriteLine();
+                    AnsiConsole.MarkupLine($"[grey]Paused:[/] {status}");
+                    exitCode = 0;
+                }
+                else
+                {
+                    exitCode = 0;
+                }
+
+                continue;
+            }
         }
 
         if (!json)

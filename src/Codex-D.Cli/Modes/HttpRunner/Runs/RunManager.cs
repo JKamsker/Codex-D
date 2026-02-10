@@ -112,13 +112,13 @@ public sealed class RunManager
             return false;
         }
 
-        active.RequestStop();
-
         var interrupt = active.Interrupt;
         if (interrupt is null)
         {
             return false;
         }
+
+        active.RequestStop();
 
         try
         {
@@ -127,6 +127,7 @@ public sealed class RunManager
         }
         catch (Exception ex)
         {
+            active.ClearStopRequested();
             _logger.LogWarning(ex, "Failed to stop run. runId={RunId}", runId);
             return false;
         }
@@ -224,22 +225,32 @@ public sealed class RunManager
             var runId = kvp.Key;
             var active = kvp.Value;
 
+            Run? record;
             try
             {
-                active.RequestPause();
-                try { active.Cancellation?.Cancel(); } catch { }
-
-                var record = await _store.TryGetAsync(runId, ct);
+                record = await _store.TryGetAsync(runId, ct);
                 if (record is null)
                 {
+                    _active.TryRemove(runId, out _);
                     continue;
                 }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to load run record while pausing in-progress runs. runId={RunId}", runId);
+                continue;
+            }
 
-                if (!string.Equals(RunKinds.Normalize(record.Kind), RunKinds.Exec, StringComparison.Ordinal))
-                {
-                    continue;
-                }
+            if (!string.Equals(RunKinds.Normalize(record.Kind), RunKinds.Exec, StringComparison.Ordinal))
+            {
+                continue;
+            }
 
+            active.RequestPause();
+            try { active.Cancellation?.Cancel(); } catch { }
+
+            try
+            {
                 if (IsTerminalStatus(record.Status) || string.Equals(record.Status, RunStatuses.Paused, StringComparison.Ordinal))
                 {
                     continue;
@@ -465,6 +476,7 @@ public sealed class RunManager
         public bool PauseRequested => Volatile.Read(ref _pauseRequested) != 0;
 
         public void RequestStop() => Interlocked.Exchange(ref _stopRequested, 1);
+        public void ClearStopRequested() => Interlocked.Exchange(ref _stopRequested, 0);
         public void RequestPause() => Interlocked.Exchange(ref _pauseRequested, 1);
     }
 }

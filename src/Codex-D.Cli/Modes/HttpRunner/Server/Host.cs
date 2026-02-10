@@ -572,7 +572,7 @@ public static class Host
                     ct);
 
                 DateTimeOffset? maxReplayedAt = null;
-                var replaySawTerminal = false;
+                string? lastReplayedType = null;
 
                 var dir = await store.TryResolveRunDirectoryAsync(runId, ct);
                 var hasRaw = dir is not null && HasRawEventsFile(dir);
@@ -601,11 +601,7 @@ public static class Host
                                 }
 
                                 maxReplayedAt = maxReplayedAt is null || env.CreatedAt > maxReplayedAt.Value ? env.CreatedAt : maxReplayedAt;
-                                if (string.Equals(env.Type, "run.completed", StringComparison.Ordinal) ||
-                                    string.Equals(env.Type, "run.paused", StringComparison.Ordinal))
-                                {
-                                    replaySawTerminal = true;
-                                }
+                                lastReplayedType = env.Type;
 
                                 await SseWriter.WriteEventAsync(
                                     ctx.Response,
@@ -624,11 +620,7 @@ public static class Host
                                 }
 
                                 maxReplayedAt = maxReplayedAt is null || env.CreatedAt > maxReplayedAt.Value ? env.CreatedAt : maxReplayedAt;
-                                if (string.Equals(env.Type, "run.completed", StringComparison.Ordinal) ||
-                                    string.Equals(env.Type, "run.paused", StringComparison.Ordinal))
-                                {
-                                    replaySawTerminal = true;
-                                }
+                                lastReplayedType = env.Type;
 
                                 await SseWriter.WriteEventAsync(
                                     ctx.Response,
@@ -691,28 +683,33 @@ public static class Host
                 }
 
                 var latest = await store.TryGetAsync(runId, ct);
-                if (!replaySawTerminal && latest is not null && IsTerminal(latest.Status))
+                if (latest is not null && IsTerminal(latest.Status))
                 {
                     // Ensure the client sees a terminal event even when we only replay rollups.
                     var terminalEventName = string.Equals(latest.Status, RunStatuses.Paused, StringComparison.Ordinal)
                         ? "run.paused"
                         : "run.completed";
-                    await SseWriter.WriteEventAsync(
-                        ctx.Response,
-                        terminalEventName,
-                        JsonSerializer.Serialize(latest, Json),
-                        ct);
-                    replaySawTerminal = true;
+
+                    if (!useRawReplay || !string.Equals(lastReplayedType, terminalEventName, StringComparison.Ordinal))
+                    {
+                        await SseWriter.WriteEventAsync(
+                            ctx.Response,
+                            terminalEventName,
+                            JsonSerializer.Serialize(latest, Json),
+                            ct);
+                    }
+
+                    return;
                 }
 
-                if (!follow || replaySawTerminal)
+                if (!follow)
                 {
                     return;
                 }
 
                 if (sub is null)
                 {
-                    return;
+                    sub = broadcaster.Subscribe(runId);
                 }
 
                 using var pingCts = CancellationTokenSource.CreateLinkedTokenSource(ct);

@@ -219,6 +219,57 @@ public sealed class RunnerHttpServerTests
     }
 
     [Fact]
+    public async Task Sse_RawReplay_DoesNotTreatHistoricalRunPausedAsTerminalAfterResume()
+    {
+        var exec = new StopThenBlockThenSucceedExecutor();
+        await using var host = await RunnerHttpTestHost.StartAsync(requireAuth: false, exec, persistRawEvents: true);
+        using var sdk = host.CreateSdkClient(includeToken: false);
+
+        var cwd = Path.Combine(host.StateDir, "repo");
+        Directory.CreateDirectory(cwd);
+
+        var created = await sdk.CreateRunAsync(new CreateRunRequest { Cwd = cwd, Prompt = "hi", Model = null, Sandbox = null, ApprovalPolicy = "never" }, CancellationToken.None);
+        var runId = created.RunId;
+
+        await exec.FirstStarted.Task;
+
+        await sdk.StopAsync(runId, CancellationToken.None);
+        await WaitForEventAsync(sdk, runId, "run.paused", TimeSpan.FromSeconds(5));
+
+        await sdk.ResumeAsync(runId, prompt: "continue", CancellationToken.None);
+        await exec.SecondStarted.Task;
+
+        var attached = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var sawCompleted = false;
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+
+        var consumeTask = Task.Run(async () =>
+        {
+            await foreach (var e in sdk.GetEventsAsync(runId, replay: true, follow: true, tail: null, cts.Token))
+            {
+                if (e.Name == "run.meta")
+                {
+                    attached.TrySetResult();
+                }
+
+                if (e.Name == "run.completed")
+                {
+                    sawCompleted = true;
+                    break;
+                }
+            }
+        }, cts.Token);
+
+        await Task.WhenAny(attached.Task, Task.Delay(TimeSpan.FromSeconds(2), cts.Token));
+        Assert.True(attached.Task.IsCompleted);
+
+        exec.AllowFinish.TrySetResult();
+
+        await consumeTask;
+        Assert.True(sawCompleted);
+    }
+
+    [Fact]
     public async Task Sse_Tail_RejectsInvalidValues()
     {
         await using var host = await RunnerHttpTestHost.StartAsync(requireAuth: false, new ImmediateSuccessExecutor());

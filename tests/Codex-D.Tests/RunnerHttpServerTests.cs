@@ -739,12 +739,19 @@ public sealed class RunnerHttpServerTests
     {
         using var cts = new CancellationTokenSource(timeout);
 
-        await foreach (var e in client.GetEventsAsync(runId, replay: true, follow: true, tail: null, cts.Token))
+        try
         {
-            if (e.Name == eventName)
+            await foreach (var e in client.GetEventsAsync(runId, replay: true, follow: true, tail: null, cts.Token))
             {
-                return;
+                if (e.Name == eventName)
+                {
+                    return;
+                }
             }
+        }
+        catch (OperationCanceledException) when (cts.IsCancellationRequested)
+        {
+            throw new TimeoutException($"Did not observe {eventName} for {runId:D} within {timeout}.");
         }
 
         throw new TimeoutException($"Did not observe {eventName} for {runId:D} within {timeout}.");

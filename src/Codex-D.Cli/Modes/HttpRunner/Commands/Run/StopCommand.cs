@@ -42,7 +42,7 @@ public sealed class StopCommand : AsyncCommand<StopCommand.Settings>
         }
         catch (Exception ex)
         {
-            AnsiConsole.MarkupLine($"[red]Failed to stop run:[/] {ex.Message}");
+            AnsiConsole.MarkupLine($"[red]Failed to stop run:[/] {Markup.Escape(ex.Message ?? string.Empty)}");
             return 1;
         }
 
@@ -64,4 +64,3 @@ public sealed class StopCommand : AsyncCommand<StopCommand.Settings>
         Console.Out.WriteLine(json);
     }
 }
-

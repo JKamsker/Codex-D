@@ -55,6 +55,22 @@ public sealed class ResumeCommand : AsyncCommand<ResumeCommand.Settings>
             return 2;
         }
 
+        if (settings.FollowOnly && settings.Tail is not null)
+        {
+            AnsiConsole.MarkupLine("[red]--follow-only conflicts with --tail.[/]");
+            return 2;
+        }
+
+        if (settings.NoFollow && settings.FollowOnly)
+        {
+            AnsiConsole.MarkupLine("[red]--no-follow conflicts with --follow-only.[/]");
+            return 2;
+        }
+
+        var replay = !settings.FollowOnly;
+        var follow = !settings.NoFollow;
+        var tail = settings.Tail;
+
         var prompt = ResolvePrompt(settings);
 
         using var client = new RunnerClient(resolved.BaseUrl, resolved.Token);
@@ -73,29 +89,13 @@ public sealed class ResumeCommand : AsyncCommand<ResumeCommand.Settings>
         }
         catch (Exception ex)
         {
-            AnsiConsole.MarkupLine($"[red]Failed to resume run:[/] {ex.Message}");
+            AnsiConsole.MarkupLine($"[red]Failed to resume run:[/] {Markup.Escape(ex.Message ?? string.Empty)}");
             return 1;
         }
 
         if (settings.Detach)
         {
             return 0;
-        }
-
-        var replay = !settings.FollowOnly;
-        var follow = !settings.NoFollow;
-        var tail = settings.Tail;
-
-        if (settings.FollowOnly && settings.Tail is not null)
-        {
-            AnsiConsole.MarkupLine("[red]--follow-only conflicts with --tail.[/]");
-            return 2;
-        }
-
-        if (settings.NoFollow && settings.FollowOnly)
-        {
-            AnsiConsole.MarkupLine("[red]--no-follow conflicts with --follow-only.[/]");
-            return 2;
         }
 
         return await ExecCommand.StreamAsync(client, runId, replay, follow, tail, settings.Json, cancellationToken);
@@ -124,4 +124,3 @@ public sealed class ResumeCommand : AsyncCommand<ResumeCommand.Settings>
         Console.Out.WriteLine(json);
     }
 }
-

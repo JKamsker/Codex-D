@@ -77,7 +77,7 @@ public sealed class RunMessagesCommand : AsyncCommand<RunMessagesCommand.Setting
         }
         catch (Exception ex)
         {
-            AnsiConsole.MarkupLine($"[red]Failed to fetch messages:[/] {ex.Message}");
+            AnsiConsole.MarkupLine($"[red]Failed to fetch messages:[/] {Markup.Escape(ex.Message ?? string.Empty)}");
             return 1;
         }
 
@@ -115,4 +115,3 @@ public sealed class RunMessagesCommand : AsyncCommand<RunMessagesCommand.Setting
         Console.Out.WriteLine(json);
     }
 }
-

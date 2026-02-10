@@ -135,11 +135,6 @@ public sealed class RunManager
 
     public async Task<Run?> ResumeAsync(Guid runId, string prompt, CancellationToken ct)
     {
-        if (_active.ContainsKey(runId))
-        {
-            return null;
-        }
-
         var record = await _store.TryGetAsync(runId, ct);
         if (record is null)
         {
@@ -164,13 +159,21 @@ public sealed class RunManager
             Error = null
         };
 
-        await _store.UpdateAsync(runId, queued, ct);
-        await AppendAndPublishAsync(runId, "run.meta", queued, ct);
-
         var active = new ActiveRun(runId);
         if (!_active.TryAdd(runId, active))
         {
             return null;
+        }
+
+        try
+        {
+            await _store.UpdateAsync(runId, queued, ct);
+            await AppendAndPublishAsync(runId, "run.meta", queued, ct);
+        }
+        catch
+        {
+            _active.TryRemove(runId, out _);
+            throw;
         }
 
         _ = Task.Run(() => ExecuteAsync(active, queued, prompt, _appStopping), CancellationToken.None);
@@ -332,8 +335,8 @@ public sealed class RunManager
                     Error = null
                 };
 
-                await _store.UpdateAsync(runId, paused, runCts.Token);
-                await AppendAndPublishAsync(runId, "run.paused", paused, runCts.Token);
+                await _store.UpdateAsync(runId, paused, CancellationToken.None);
+                await AppendAndPublishAsync(runId, "run.paused", paused, CancellationToken.None);
                 return;
             }
 

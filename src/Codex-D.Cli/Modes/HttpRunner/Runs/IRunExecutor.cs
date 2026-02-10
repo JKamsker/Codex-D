@@ -13,6 +13,7 @@ public sealed record class RunExecutionContext
     public required Guid RunId { get; init; }
     public required string Cwd { get; init; }
     public required string Prompt { get; init; }
+    public string? CodexThreadId { get; init; }
     public string? Kind { get; init; }
     public RunReviewRequest? Review { get; init; }
     public string? Model { get; init; }

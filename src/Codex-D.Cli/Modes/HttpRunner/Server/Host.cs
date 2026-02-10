@@ -265,6 +265,22 @@ public static class Host
             return ok ? Results.Accepted() : Results.NotFound(new { error = "not_found_or_not_running" });
         });
 
+        app.MapPost("/v1/runs/{runId:guid}/stop", async (Guid runId, RunManager runs, CancellationToken ct) =>
+        {
+            var ok = await runs.TryStopAsync(runId, ct);
+            return ok ? Results.Accepted() : Results.NotFound(new { error = "not_found_or_not_running" });
+        });
+
+        app.MapPost("/v1/runs/{runId:guid}/resume", async (Guid runId, ResumeRunRequest? request, RunManager runs, CancellationToken ct) =>
+        {
+            var prompt = string.IsNullOrWhiteSpace(request?.Prompt) ? "continue" : request!.Prompt!.Trim();
+
+            var resumed = await runs.ResumeAsync(runId, prompt, ct);
+            return resumed is null
+                ? Results.NotFound(new { error = "not_found_or_not_resumable" })
+                : Results.Ok(new { runId = resumed.RunId, status = resumed.Status });
+        });
+
         app.MapGet("/v1/runs/{runId:guid}/messages", async (Guid runId, HttpRequest req, RunStore store, CancellationToken ct) =>
         {
             var record = await store.TryGetAsync(runId, ct);
@@ -556,7 +572,7 @@ public static class Host
                     ct);
 
                 DateTimeOffset? maxReplayedAt = null;
-                var replaySawCompleted = false;
+                var replaySawTerminal = false;
 
                 var dir = await store.TryResolveRunDirectoryAsync(runId, ct);
                 var hasRaw = dir is not null && HasRawEventsFile(dir);
@@ -585,9 +601,10 @@ public static class Host
                                 }
 
                                 maxReplayedAt = maxReplayedAt is null || env.CreatedAt > maxReplayedAt.Value ? env.CreatedAt : maxReplayedAt;
-                                if (string.Equals(env.Type, "run.completed", StringComparison.Ordinal))
+                                if (string.Equals(env.Type, "run.completed", StringComparison.Ordinal) ||
+                                    string.Equals(env.Type, "run.paused", StringComparison.Ordinal))
                                 {
-                                    replaySawCompleted = true;
+                                    replaySawTerminal = true;
                                 }
 
                                 await SseWriter.WriteEventAsync(
@@ -607,9 +624,10 @@ public static class Host
                                 }
 
                                 maxReplayedAt = maxReplayedAt is null || env.CreatedAt > maxReplayedAt.Value ? env.CreatedAt : maxReplayedAt;
-                                if (string.Equals(env.Type, "run.completed", StringComparison.Ordinal))
+                                if (string.Equals(env.Type, "run.completed", StringComparison.Ordinal) ||
+                                    string.Equals(env.Type, "run.paused", StringComparison.Ordinal))
                                 {
-                                    replaySawCompleted = true;
+                                    replaySawTerminal = true;
                                 }
 
                                 await SseWriter.WriteEventAsync(
@@ -673,18 +691,21 @@ public static class Host
                 }
 
                 var latest = await store.TryGetAsync(runId, ct);
-                if (!replaySawCompleted && latest is not null && IsTerminal(latest.Status))
+                if (!replaySawTerminal && latest is not null && IsTerminal(latest.Status))
                 {
                     // Ensure the client sees a terminal event even when we only replay rollups.
+                    var terminalEventName = string.Equals(latest.Status, RunStatuses.Paused, StringComparison.Ordinal)
+                        ? "run.paused"
+                        : "run.completed";
                     await SseWriter.WriteEventAsync(
                         ctx.Response,
-                        "run.completed",
+                        terminalEventName,
                         JsonSerializer.Serialize(latest, Json),
                         ct);
-                    replaySawCompleted = true;
+                    replaySawTerminal = true;
                 }
 
-                if (!follow || replaySawCompleted)
+                if (!follow || replaySawTerminal)
                 {
                     return;
                 }
@@ -724,7 +745,8 @@ public static class Host
                             env.Data.GetRawText(),
                             ct);
 
-                        if (string.Equals(env.Type, "run.completed", StringComparison.Ordinal))
+                        if (string.Equals(env.Type, "run.completed", StringComparison.Ordinal) ||
+                            string.Equals(env.Type, "run.paused", StringComparison.Ordinal))
                         {
                             break;
                         }
@@ -766,6 +788,7 @@ public static class Host
     private static bool IsTerminal(string status) =>
         string.Equals(status, RunStatuses.Succeeded, StringComparison.Ordinal) ||
         string.Equals(status, RunStatuses.Failed, StringComparison.Ordinal) ||
+        string.Equals(status, RunStatuses.Paused, StringComparison.Ordinal) ||
         string.Equals(status, RunStatuses.Interrupted, StringComparison.Ordinal);
 
     private static bool? ParseBool(string value) =>

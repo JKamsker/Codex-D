@@ -82,11 +82,11 @@ public sealed class ProcessHost : BackgroundService
                 {
                     try
                     {
-                        await _runs.FailAllInProgressAsync("codex runtime restarted", stoppingToken);
+                        await _runs.PauseAllInProgressAsync("codex runtime restarted", stoppingToken);
                     }
                     catch (Exception ex)
                     {
-                        _logger.LogWarning(ex, "Failed to mark in-progress runs as failed after runtime exit.");
+                        _logger.LogWarning(ex, "Failed to mark in-progress runs as paused after runtime exit.");
                     }
                 }
 

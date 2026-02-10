@@ -6,6 +6,7 @@ using CodexD.Shared.Paths;
 using CodexD.HttpRunner.Runs;
 using JKToolKit.CodexSDK.AppServer;
 using JKToolKit.CodexSDK.AppServer.ApprovalHandlers;
+using JKToolKit.CodexSDK.AppServer.Resiliency;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
@@ -142,11 +143,21 @@ public static class Host
                 });
             }
 
-            var ready = state.TryGetClient() is not null;
+            var client = state.TryGetClient();
+            var codexRuntime = client is null
+                ? "starting"
+                : client.State switch
+                {
+                    CodexAppServerConnectionState.Connected => "ready",
+                    CodexAppServerConnectionState.Restarting => "restarting",
+                    CodexAppServerConnectionState.Faulted => "faulted",
+                    CodexAppServerConnectionState.Disposed => "disposed",
+                    _ => "unknown"
+                };
             return Results.Ok(new
             {
                 status = "ok",
-                codexRuntime = ready ? "ready" : "starting"
+                codexRuntime
             });
         });
 

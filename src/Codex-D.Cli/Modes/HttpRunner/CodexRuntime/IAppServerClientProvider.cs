@@ -1,9 +1,9 @@
-using JKToolKit.CodexSDK.AppServer;
+using JKToolKit.CodexSDK.AppServer.Resiliency;
 
 namespace CodexD.HttpRunner.CodexRuntime;
 
 public interface IAppServerClientProvider
 {
-    ValueTask<CodexAppServerClient> GetClientAsync(CancellationToken ct = default);
-    CodexAppServerClient? TryGetClient();
+    ValueTask<ResilientCodexAppServerClient> GetClientAsync(CancellationToken ct = default);
+    ResilientCodexAppServerClient? TryGetClient();
 }

@@ -32,7 +32,7 @@ public sealed class CodexReviewRunExecutor : IRunExecutor
 
         using var linked = CancellationTokenSource.CreateLinkedTokenSource(ct, interruptCts.Token);
 
-        await context.SetCodexIdsAsync("review", null, linked.Token);
+        await context.SetCodexIdsAsync("review", null, null, linked.Token);
 
         var options = new CodexReviewOptions(context.Cwd)
         {

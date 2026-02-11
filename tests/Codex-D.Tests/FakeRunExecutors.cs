@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Text;
 using CodexD.HttpRunner.Contracts;
 using CodexD.HttpRunner.Runs;
 
@@ -9,14 +10,18 @@ internal sealed class ImmediateSuccessExecutor : IRunExecutor
     public async Task<RunExecutionResult> ExecuteAsync(RunExecutionContext context, CancellationToken ct)
     {
         context.SetInterrupt(_ => Task.CompletedTask);
-        await context.SetCodexIdsAsync("thread-test", "turn-test", ct);
+
+        var rolloutPath = TestCodexRollout.EnsureInitialized(context.Cwd);
+        await context.SetCodexIdsAsync("thread-test", "turn-test", rolloutPath, ct);
 
         // Use commandExecution output deltas with newlines so the server's rollup writer can persist completed lines.
+        TestCodexRollout.AppendExecCommandOutputDelta(rolloutPath, "hello\nwor");
         await context.PublishNotificationAsync(
             "item/commandExecution/outputDelta",
             JsonSerializer.SerializeToElement(new { delta = "hello\nwor" }),
             ct);
 
+        TestCodexRollout.AppendExecCommandOutputDelta(rolloutPath, "ld\ndone\n");
         await context.PublishNotificationAsync(
             "item/commandExecution/outputDelta",
             JsonSerializer.SerializeToElement(new { delta = "ld\ndone\n" }),
@@ -40,8 +45,10 @@ internal sealed class CoordinatedExecutor : IRunExecutor
             return Task.CompletedTask;
         });
 
-        await context.SetCodexIdsAsync("thread-test", "turn-test", ct);
+        var rolloutPath = TestCodexRollout.EnsureInitialized(context.Cwd);
+        await context.SetCodexIdsAsync("thread-test", "turn-test", rolloutPath, ct);
 
+        TestCodexRollout.AppendExecCommandOutputDelta(rolloutPath, "early\n");
         await context.PublishNotificationAsync(
             "item/commandExecution/outputDelta",
             JsonSerializer.SerializeToElement(new { delta = "early\n" }),
@@ -55,6 +62,7 @@ internal sealed class CoordinatedExecutor : IRunExecutor
             return new RunExecutionResult { Status = RunStatuses.Interrupted, Error = null };
         }
 
+        TestCodexRollout.AppendExecCommandOutputDelta(rolloutPath, "late\n");
         await context.PublishNotificationAsync(
             "item/commandExecution/outputDelta",
             JsonSerializer.SerializeToElement(new { delta = "late\n" }),
@@ -69,17 +77,26 @@ internal sealed class MessagesAndThinkingExecutor : IRunExecutor
     public async Task<RunExecutionResult> ExecuteAsync(RunExecutionContext context, CancellationToken ct)
     {
         context.SetInterrupt(_ => Task.CompletedTask);
-        await context.SetCodexIdsAsync("thread-test", "turn-test", ct);
+
+        var rolloutPath = TestCodexRollout.EnsureInitialized(context.Cwd);
+        await context.SetCodexIdsAsync("thread-test", "turn-test", rolloutPath, ct);
 
         // Thinking summaries (server extracts **...** lines from commandExecution output deltas while "thinking" is active).
+        TestCodexRollout.AppendExecCommandOutputDelta(rolloutPath, "thinking");
         await context.PublishNotificationAsync("item/commandExecution/outputDelta", JsonSerializer.SerializeToElement(new { delta = "thinking" }), ct);
+        TestCodexRollout.AppendExecCommandOutputDelta(rolloutPath, "**Phase 1**\nnot a heading\n**Phase 2**\n");
         await context.PublishNotificationAsync("item/commandExecution/outputDelta", JsonSerializer.SerializeToElement(new { delta = "**Phase 1**\nnot a heading\n**Phase 2**\n" }), ct);
+        TestCodexRollout.AppendExecCommandOutputDelta(rolloutPath, "final");
         await context.PublishNotificationAsync("item/commandExecution/outputDelta", JsonSerializer.SerializeToElement(new { delta = "final" }), ct);
+        TestCodexRollout.AppendExecCommandOutputDelta(rolloutPath, "**ignored**");
         await context.PublishNotificationAsync("item/commandExecution/outputDelta", JsonSerializer.SerializeToElement(new { delta = "**ignored**" }), ct);
 
         // Completed agent messages (server extracts item/completed -> item.type=agentMessage -> item.text).
+        TestCodexRollout.AppendAgentMessage(rolloutPath, "one");
         await context.PublishNotificationAsync("item/completed", JsonSerializer.SerializeToElement(new { item = new { type = "agentMessage", text = "one" } }), ct);
+        TestCodexRollout.AppendAgentMessage(rolloutPath, "two");
         await context.PublishNotificationAsync("item/completed", JsonSerializer.SerializeToElement(new { item = new { type = "agentMessage", text = "two" } }), ct);
+        TestCodexRollout.AppendAgentMessage(rolloutPath, "three");
         await context.PublishNotificationAsync("item/completed", JsonSerializer.SerializeToElement(new { item = new { type = "agentMessage", text = "three" } }), ct);
 
         return new RunExecutionResult { Status = RunStatuses.Succeeded, Error = null };
@@ -91,8 +108,11 @@ internal sealed class PartialLineExecutor : IRunExecutor
     public async Task<RunExecutionResult> ExecuteAsync(RunExecutionContext context, CancellationToken ct)
     {
         context.SetInterrupt(_ => Task.CompletedTask);
-        await context.SetCodexIdsAsync("thread-test", "turn-test", ct);
 
+        var rolloutPath = TestCodexRollout.EnsureInitialized(context.Cwd);
+        await context.SetCodexIdsAsync("thread-test", "turn-test", rolloutPath, ct);
+
+        TestCodexRollout.AppendExecCommandOutputDelta(rolloutPath, "partial");
         await context.PublishNotificationAsync(
             "item/commandExecution/outputDelta",
             JsonSerializer.SerializeToElement(new { delta = "partial" }),
@@ -107,8 +127,11 @@ internal sealed class CrLfExecutor : IRunExecutor
     public async Task<RunExecutionResult> ExecuteAsync(RunExecutionContext context, CancellationToken ct)
     {
         context.SetInterrupt(_ => Task.CompletedTask);
-        await context.SetCodexIdsAsync("thread-test", "turn-test", ct);
 
+        var rolloutPath = TestCodexRollout.EnsureInitialized(context.Cwd);
+        await context.SetCodexIdsAsync("thread-test", "turn-test", rolloutPath, ct);
+
+        TestCodexRollout.AppendExecCommandOutputDelta(rolloutPath, "a\r\nb\r\n");
         await context.PublishNotificationAsync(
             "item/commandExecution/outputDelta",
             JsonSerializer.SerializeToElement(new { delta = "a\r\nb\r\n" }),
@@ -123,7 +146,9 @@ internal sealed class PlanOnlyExecutor : IRunExecutor
     public async Task<RunExecutionResult> ExecuteAsync(RunExecutionContext context, CancellationToken ct)
     {
         context.SetInterrupt(_ => Task.CompletedTask);
-        await context.SetCodexIdsAsync("thread-test", "turn-test", ct);
+
+        var rolloutPath = TestCodexRollout.EnsureInitialized(context.Cwd);
+        await context.SetCodexIdsAsync("thread-test", "turn-test", rolloutPath, ct);
 
         await context.PublishNotificationAsync(
             "item/plan/delta",
@@ -139,13 +164,17 @@ internal sealed class SplitCrLfAcrossDeltasExecutor : IRunExecutor
     public async Task<RunExecutionResult> ExecuteAsync(RunExecutionContext context, CancellationToken ct)
     {
         context.SetInterrupt(_ => Task.CompletedTask);
-        await context.SetCodexIdsAsync("thread-test", "turn-test", ct);
 
+        var rolloutPath = TestCodexRollout.EnsureInitialized(context.Cwd);
+        await context.SetCodexIdsAsync("thread-test", "turn-test", rolloutPath, ct);
+
+        TestCodexRollout.AppendExecCommandOutputDelta(rolloutPath, "a\r");
         await context.PublishNotificationAsync(
             "item/commandExecution/outputDelta",
             JsonSerializer.SerializeToElement(new { delta = "a\r" }),
             ct);
 
+        TestCodexRollout.AppendExecCommandOutputDelta(rolloutPath, "\nb\r\n");
         await context.PublishNotificationAsync(
             "item/commandExecution/outputDelta",
             JsonSerializer.SerializeToElement(new { delta = "\nb\r\n" }),
@@ -160,13 +189,17 @@ internal sealed class NewlineOnlyDeltaExecutor : IRunExecutor
     public async Task<RunExecutionResult> ExecuteAsync(RunExecutionContext context, CancellationToken ct)
     {
         context.SetInterrupt(_ => Task.CompletedTask);
-        await context.SetCodexIdsAsync("thread-test", "turn-test", ct);
 
+        var rolloutPath = TestCodexRollout.EnsureInitialized(context.Cwd);
+        await context.SetCodexIdsAsync("thread-test", "turn-test", rolloutPath, ct);
+
+        TestCodexRollout.AppendExecCommandOutputDelta(rolloutPath, "hello");
         await context.PublishNotificationAsync(
             "item/commandExecution/outputDelta",
             JsonSerializer.SerializeToElement(new { delta = "hello" }),
             ct);
 
+        TestCodexRollout.AppendExecCommandOutputDelta(rolloutPath, "\n");
         await context.PublishNotificationAsync(
             "item/commandExecution/outputDelta",
             JsonSerializer.SerializeToElement(new { delta = "\n" }),
@@ -181,8 +214,11 @@ internal sealed class InlineThinkingMarkersExecutor : IRunExecutor
     public async Task<RunExecutionResult> ExecuteAsync(RunExecutionContext context, CancellationToken ct)
     {
         context.SetInterrupt(_ => Task.CompletedTask);
-        await context.SetCodexIdsAsync("thread-test", "turn-test", ct);
 
+        var rolloutPath = TestCodexRollout.EnsureInitialized(context.Cwd);
+        await context.SetCodexIdsAsync("thread-test", "turn-test", rolloutPath, ct);
+
+        TestCodexRollout.AppendExecCommandOutputDelta(rolloutPath, "thinking\n**Phase 1**\nfinal\n");
         await context.PublishNotificationAsync(
             "item/commandExecution/outputDelta",
             JsonSerializer.SerializeToElement(new { delta = "thinking\n**Phase 1**\nfinal\n" }),
@@ -202,6 +238,7 @@ internal sealed class StopThenSucceedExecutor : IRunExecutor
     public async Task<RunExecutionResult> ExecuteAsync(RunExecutionContext context, CancellationToken ct)
     {
         var attempt = IncrementAttempt(context.RunId);
+        var rolloutPath = TestCodexRollout.EnsureInitialized(context.Cwd);
 
         if (attempt == 1)
         {
@@ -212,8 +249,9 @@ internal sealed class StopThenSucceedExecutor : IRunExecutor
                 return Task.CompletedTask;
             });
 
-            await context.SetCodexIdsAsync("thread-test", "turn-test", ct);
+            await context.SetCodexIdsAsync("thread-test", "turn-test", rolloutPath, ct);
 
+            TestCodexRollout.AppendExecCommandOutputDelta(rolloutPath, "phase1\n");
             await context.PublishNotificationAsync(
                 "item/commandExecution/outputDelta",
                 JsonSerializer.SerializeToElement(new { delta = "phase1\n" }),
@@ -226,8 +264,9 @@ internal sealed class StopThenSucceedExecutor : IRunExecutor
         }
 
         context.SetInterrupt(_ => Task.CompletedTask);
-        await context.SetCodexIdsAsync("thread-test", $"turn-test-{attempt}", ct);
+        await context.SetCodexIdsAsync("thread-test", $"turn-test-{attempt}", rolloutPath, ct);
 
+        TestCodexRollout.AppendExecCommandOutputDelta(rolloutPath, "phase2\n");
         await context.PublishNotificationAsync(
             "item/commandExecution/outputDelta",
             JsonSerializer.SerializeToElement(new { delta = "phase2\n" }),
@@ -264,6 +303,7 @@ internal sealed class StopThenBlockThenSucceedExecutor : IRunExecutor
     public async Task<RunExecutionResult> ExecuteAsync(RunExecutionContext context, CancellationToken ct)
     {
         var attempt = IncrementAttempt(context.RunId);
+        var rolloutPath = TestCodexRollout.EnsureInitialized(context.Cwd);
 
         if (attempt == 1)
         {
@@ -274,8 +314,9 @@ internal sealed class StopThenBlockThenSucceedExecutor : IRunExecutor
                 return Task.CompletedTask;
             });
 
-            await context.SetCodexIdsAsync("thread-test", "turn-test", ct);
+            await context.SetCodexIdsAsync("thread-test", "turn-test", rolloutPath, ct);
 
+            TestCodexRollout.AppendExecCommandOutputDelta(rolloutPath, "phase1\n");
             await context.PublishNotificationAsync(
                 "item/commandExecution/outputDelta",
                 JsonSerializer.SerializeToElement(new { delta = "phase1\n" }),
@@ -288,8 +329,9 @@ internal sealed class StopThenBlockThenSucceedExecutor : IRunExecutor
         }
 
         context.SetInterrupt(_ => Task.CompletedTask);
-        await context.SetCodexIdsAsync("thread-test", $"turn-test-{attempt}", ct);
+        await context.SetCodexIdsAsync("thread-test", $"turn-test-{attempt}", rolloutPath, ct);
 
+        TestCodexRollout.AppendExecCommandOutputDelta(rolloutPath, "phase2\n");
         await context.PublishNotificationAsync(
             "item/commandExecution/outputDelta",
             JsonSerializer.SerializeToElement(new { delta = "phase2\n" }),
@@ -299,6 +341,7 @@ internal sealed class StopThenBlockThenSucceedExecutor : IRunExecutor
 
         await AllowFinish.Task.WaitAsync(ct);
 
+        TestCodexRollout.AppendExecCommandOutputDelta(rolloutPath, "done\n");
         await context.PublishNotificationAsync(
             "item/commandExecution/outputDelta",
             JsonSerializer.SerializeToElement(new { delta = "done\n" }),
@@ -320,5 +363,73 @@ internal sealed class StopThenBlockThenSucceedExecutor : IRunExecutor
             _attempts[runId] = current;
             return current;
         }
+    }
+}
+
+internal static class TestCodexRollout
+{
+    public static string EnsureInitialized(string cwd)
+    {
+        var path = Path.Combine(cwd, "test-rollout.jsonl");
+        if (File.Exists(path))
+        {
+            return path;
+        }
+
+        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        AppendLine(path, new
+        {
+            timestamp = DateTimeOffset.UtcNow.ToString("O"),
+            type = "session_meta",
+            payload = new
+            {
+                id = "thread-test",
+                timestamp = DateTimeOffset.UtcNow.ToString("O"),
+                cwd,
+                originator = "codex-d-tests",
+                cli_version = "0.0.0",
+                source = "cli",
+                model_provider = "test"
+            }
+        });
+
+        return path;
+    }
+
+    public static void AppendExecCommandOutputDelta(string rolloutPath, string delta)
+    {
+        var chunk = Convert.ToBase64String(Encoding.UTF8.GetBytes(delta ?? string.Empty));
+        AppendLine(rolloutPath, new
+        {
+            timestamp = DateTimeOffset.UtcNow.ToString("O"),
+            type = "event_msg",
+            payload = new
+            {
+                type = "exec_command_output_delta",
+                call_id = "call-test",
+                stream = "stdout",
+                chunk
+            }
+        });
+    }
+
+    public static void AppendAgentMessage(string rolloutPath, string message)
+    {
+        AppendLine(rolloutPath, new
+        {
+            timestamp = DateTimeOffset.UtcNow.ToString("O"),
+            type = "event_msg",
+            payload = new
+            {
+                type = "agent_message",
+                message = message ?? string.Empty
+            }
+        });
+    }
+
+    private static void AppendLine(string path, object value)
+    {
+        var json = JsonSerializer.Serialize(value, new JsonSerializerOptions(JsonSerializerDefaults.Web));
+        File.AppendAllText(path, json + "\n", Encoding.UTF8);
     }
 }

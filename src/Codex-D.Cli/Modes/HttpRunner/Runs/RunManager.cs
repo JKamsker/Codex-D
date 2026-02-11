@@ -14,7 +14,7 @@ public sealed class RunManager
 
     private readonly RunStore _store;
     private readonly RunEventBroadcaster _broadcaster;
-    private readonly RunRollupWriter _rollup;
+    private readonly RunNotificationBacklog _backlog;
     private readonly IRunExecutor _executor;
     private readonly CancellationToken _appStopping;
     private readonly ILogger<RunManager> _logger;
@@ -24,14 +24,14 @@ public sealed class RunManager
     public RunManager(
         RunStore store,
         RunEventBroadcaster broadcaster,
-        RunRollupWriter rollup,
+        RunNotificationBacklog backlog,
         IRunExecutor executor,
         IHostApplicationLifetime lifetime,
         ILogger<RunManager> logger)
     {
         _store = store;
         _broadcaster = broadcaster;
-        _rollup = rollup;
+        _backlog = backlog;
         _executor = executor;
         _appStopping = lifetime.ApplicationStopping;
         _logger = logger;
@@ -296,12 +296,21 @@ public sealed class RunManager
             Task PublishNotificationAsync(string method, JsonElement @params, CancellationToken ct) =>
                 AppendAndPublishAsync(runId, "codex.notification", new { method, @params }, ct);
 
-            async Task SetCodexIdsAsync(string threadId, string? turnId, CancellationToken ct)
+            async Task SetCodexIdsAsync(string threadId, string? turnId, string? rolloutPath, CancellationToken ct)
             {
-                record = record with { CodexThreadId = threadId, CodexTurnId = turnId ?? record.CodexTurnId };
+                var normalizedRolloutPath = CodexRolloutPathNormalizer.Normalize(rolloutPath);
+
+                record = record with
+                {
+                    CodexThreadId = threadId,
+                    CodexTurnId = turnId ?? record.CodexTurnId,
+                    CodexRolloutPath = normalizedRolloutPath ?? record.CodexRolloutPath
+                };
 
                 await _store.UpdateAsync(runId, record, ct);
                 await AppendAndPublishAsync(runId, "run.meta", record, ct);
+
+                _backlog.SetRolloutPath(runId, record.CodexRolloutPath);
             }
 
             void SetInterrupt(Func<CancellationToken, Task> interrupt) => active.Interrupt = interrupt;
@@ -429,18 +438,9 @@ public sealed class RunManager
             _logger.LogWarning(ex, "Failed to persist raw run event. runId={RunId} type={Type}", runId, type);
         }
 
-        try
+        if (string.Equals(type, "codex.notification", StringComparison.Ordinal))
         {
-            await _rollup.OnEnvelopeAsync(runId, envelope, ct);
-            if (string.Equals(type, "run.completed", StringComparison.Ordinal) ||
-                string.Equals(type, "run.paused", StringComparison.Ordinal))
-            {
-                await _rollup.FlushAndStopAsync(runId, envelope.CreatedAt, ct);
-            }
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex, "Failed to persist run rollup. runId={RunId} type={Type}", runId, type);
+            _backlog.Add(runId, envelope);
         }
     }
 

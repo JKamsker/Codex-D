@@ -57,7 +57,8 @@ public sealed class CodexAppServerRunExecutor : IRunExecutor
                 ct);
         }
 
-        await context.SetCodexIdsAsync(thread.Id, null, ct);
+        var rolloutPath = CodexThreadRolloutPathExtractor.TryExtract(thread.Raw);
+        await context.SetCodexIdsAsync(thread.Id, null, rolloutPath, ct);
 
         await using var turn = await client.StartTurnAsync(
             thread.Id,
@@ -72,7 +73,7 @@ public sealed class CodexAppServerRunExecutor : IRunExecutor
             ct);
 
         context.SetInterrupt(c => turn.InterruptAsync(c));
-        await context.SetCodexIdsAsync(thread.Id, turn.TurnId, ct);
+        await context.SetCodexIdsAsync(thread.Id, turn.TurnId, rolloutPath, ct);
 
         await foreach (var notification in turn.Events(ct))
         {

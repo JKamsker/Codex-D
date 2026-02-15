@@ -10,6 +10,15 @@ public sealed class ReviewCommand : AsyncCommand<ReviewCommand.Settings>
 {
     public sealed class Settings : ClientSettingsBase
     {
+        [CommandOption("--mode <MODE>")]
+        [DefaultValue("exec")]
+        [Description("Review execution mode: 'exec' (codex review) or 'appserver' (codex app-server review/start).")]
+        public string Mode { get; init; } = "exec";
+
+        [CommandOption("--delivery <DELIVERY>")]
+        [Description("App-server review delivery: 'inline' or 'detached' (only when --mode appserver).")]
+        public string? Delivery { get; init; }
+
         [CommandOption("-p|--prompt <PROMPT>")]
         [Description("Optional custom review instructions. Use '-' to read stdin.")]
         public string? PromptOption { get; init; }
@@ -78,6 +87,18 @@ public sealed class ReviewCommand : AsyncCommand<ReviewCommand.Settings>
         }
         var prompt = ResolvePrompt(settings);
 
+        var mode = (settings.Mode ?? "exec").Trim();
+        if (string.IsNullOrWhiteSpace(mode))
+        {
+            mode = "exec";
+        }
+
+        if (!string.Equals(mode, "exec", StringComparison.OrdinalIgnoreCase) &&
+            !string.Equals(mode, "appserver", StringComparison.OrdinalIgnoreCase))
+        {
+            throw new ArgumentException("Invalid --mode. Use 'exec' or 'appserver'.");
+        }
+
         var baseBranch = TrimOrNull(settings.BaseBranch);
         var commitSha = TrimOrNull(settings.CommitSha);
         var uncommitted = settings.Uncommitted;
@@ -97,13 +118,25 @@ public sealed class ReviewCommand : AsyncCommand<ReviewCommand.Settings>
             throw new ArgumentException("Only one of --uncommitted, --base, or --commit can be specified.");
         }
 
+        if (string.Equals(mode, "appserver", StringComparison.OrdinalIgnoreCase))
+        {
+            if (settings.Config.Length > 0 || settings.Enable.Length > 0 || settings.Disable.Length > 0 || settings.Arg.Length > 0)
+            {
+                throw new ArgumentException("--config/--enable/--disable/--arg are only supported with --mode exec.");
+            }
+        }
+
         var review = new RunReviewRequest
         {
+            Mode = mode,
+            Delivery = TrimOrNull(settings.Delivery),
             Uncommitted = uncommitted,
             BaseBranch = baseBranch,
             CommitSha = commitSha,
             Title = TrimOrNull(settings.Title),
-            AdditionalOptions = BuildAdditionalOptions(settings)
+            AdditionalOptions = string.Equals(mode, "appserver", StringComparison.OrdinalIgnoreCase)
+                ? []
+                : BuildAdditionalOptions(settings)
         };
 
         var request = new CreateRunRequest
@@ -112,6 +145,7 @@ public sealed class ReviewCommand : AsyncCommand<ReviewCommand.Settings>
             Prompt = prompt,
             Kind = RunKinds.Review,
             Review = review,
+            Model = TrimOrNull(settings.Model),
             ApprovalPolicy = string.IsNullOrWhiteSpace(settings.ApprovalPolicy) ? "never" : settings.ApprovalPolicy.Trim()
         };
 

@@ -29,17 +29,36 @@ public sealed class CodexAppServerRunExecutor : IRunExecutor
         var sandbox = ResolveSandboxOrDefault(context.Sandbox);
         var approvalPolicy = ResolveApprovalPolicyOrDefault(context.ApprovalPolicy);
 
-        var threadOptions = new ThreadStartOptions
+        CodexThread thread;
+        if (!string.IsNullOrWhiteSpace(context.CodexThreadId))
         {
-            Cwd = context.Cwd,
-            Model = model,
-            Sandbox = sandbox,
-            ApprovalPolicy = approvalPolicy,
-            Ephemeral = true
-        };
+            thread = await client.ResumeThreadAsync(
+                new ThreadResumeOptions
+                {
+                    ThreadId = context.CodexThreadId,
+                    Cwd = context.Cwd,
+                    Model = model,
+                    ApprovalPolicy = approvalPolicy,
+                    Sandbox = sandbox
+                },
+                ct);
+        }
+        else
+        {
+            thread = await client.StartThreadAsync(
+                new ThreadStartOptions
+                {
+                    Cwd = context.Cwd,
+                    Model = model,
+                    Sandbox = sandbox,
+                    ApprovalPolicy = approvalPolicy,
+                    Ephemeral = false
+                },
+                ct);
+        }
 
-        var thread = await client.StartThreadAsync(threadOptions, ct);
-        await context.SetCodexIdsAsync(thread.Id, null, ct);
+        var rolloutPath = CodexThreadRolloutPathExtractor.TryExtract(thread.Raw);
+        await context.SetCodexIdsAsync(thread.Id, null, rolloutPath, ct);
 
         await using var turn = await client.StartTurnAsync(
             thread.Id,
@@ -54,7 +73,7 @@ public sealed class CodexAppServerRunExecutor : IRunExecutor
             ct);
 
         context.SetInterrupt(c => turn.InterruptAsync(c));
-        await context.SetCodexIdsAsync(thread.Id, turn.TurnId, ct);
+        await context.SetCodexIdsAsync(thread.Id, turn.TurnId, rolloutPath, ct);
 
         await foreach (var notification in turn.Events(ct))
         {

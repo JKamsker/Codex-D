@@ -1,40 +1,33 @@
 using System.ComponentModel;
 using System.Text.Json;
 using CodexD.HttpRunner.Client;
-using CodexD.Utils;
 using Spectre.Console;
 using Spectre.Console.Cli;
 
 namespace CodexD.HttpRunner.Commands.Run;
 
-public sealed class RunMessagesCommand : AsyncCommand<RunMessagesCommand.Settings>
+public sealed class SteerCommand : AsyncCommand<SteerCommand.Settings>
 {
     public sealed class Settings : ClientSettingsBase
     {
-        [CommandOption("-n|--count <N>")]
-        [Description("Number of messages to print (last N).")]
-        public int Count { get; init; } = 1;
-
-        [CommandOption("--tail-events <N>")]
-        [Description("Only scan the last N events on the server (performance guard). Default: 20000.")]
-        public int? TailEvents { get; init; }
-
         [CommandOption("--last")]
-        [Description("Use the most recent run for the current --cd/cwd.")]
+        [Description("Steer the most recent run for the current --cd/cwd.")]
         public bool Last { get; init; }
+
+        [CommandOption("-p|--prompt <PROMPT>")]
+        [Description("Steer text to send to the active turn. Use '-' to read stdin.")]
+        public string? PromptOption { get; init; }
 
         [CommandArgument(0, "[RUN_ID]")]
         public string? RunId { get; init; }
+
+        [CommandArgument(1, "[PROMPT]")]
+        [Description("Steer text to send to the active turn. Use '-' to read stdin.")]
+        public string[] Prompt { get; init; } = [];
     }
 
     public override async Task<int> ExecuteAsync(CommandContext context, Settings settings, CancellationToken cancellationToken)
     {
-        if (settings.Count <= 0)
-        {
-            AnsiConsole.MarkupLine("[red]--count must be > 0[/]");
-            return 2;
-        }
-
         ResolvedClientSettings resolved;
         try
         {
@@ -70,48 +63,55 @@ public sealed class RunMessagesCommand : AsyncCommand<RunMessagesCommand.Setting
             }
         }
 
-        IReadOnlyList<string> messages;
+        var prompt = ResolvePrompt(settings);
+        if (string.IsNullOrWhiteSpace(prompt))
+        {
+            AnsiConsole.MarkupLine("[red]Missing steer prompt.[/]");
+            return 2;
+        }
+
         try
         {
-            messages = await client.GetRunMessagesAsync(runId, settings.Count, settings.TailEvents, cancellationToken);
+            await client.SteerAsync(runId, prompt, cancellationToken);
         }
         catch (Exception ex)
         {
-            AnsiConsole.MarkupLine($"[red]Failed to fetch messages:[/] {Markup.Escape(ex.Message ?? string.Empty)}");
+            AnsiConsole.MarkupLine($"[red]Failed to steer run:[/] {Markup.Escape(ex.Message ?? string.Empty)}");
             return 1;
         }
 
         if (settings.Json)
         {
-            WriteJson(new { runId, items = messages });
-            return 0;
+            WriteJsonLine(new { eventName = "run.steered", runId });
         }
-
-        if (messages.Count == 0)
+        else
         {
-            AnsiConsole.MarkupLine($"[grey]No completed agent messages found for:[/] {runId:D}");
-            return 0;
-        }
-
-        var i = 0;
-        foreach (var msg in messages)
-        {
-            if (i++ > 0)
-            {
-                Console.Out.WriteLine();
-                Console.Out.WriteLine("-----");
-                Console.Out.WriteLine();
-            }
-
-            Console.Out.WriteLine(TextMojibakeRepair.Fix(msg));
+            AnsiConsole.MarkupLine($"Steered: [cyan]{runId:D}[/]");
         }
 
         return 0;
     }
 
-    private static void WriteJson(object value)
+    private static string ResolvePrompt(Settings settings)
+    {
+        var prompt = settings.PromptOption;
+        if (string.IsNullOrWhiteSpace(prompt) && settings.Prompt.Length > 0)
+        {
+            prompt = string.Join(" ", settings.Prompt);
+        }
+
+        if (string.Equals(prompt, "-", StringComparison.Ordinal))
+        {
+            return Console.In.ReadToEnd();
+        }
+
+        return string.IsNullOrWhiteSpace(prompt) ? string.Empty : prompt;
+    }
+
+    private static void WriteJsonLine(object value)
     {
         var json = JsonSerializer.Serialize(value, new JsonSerializerOptions(JsonSerializerDefaults.Web));
         Console.Out.WriteLine(json);
     }
 }
+

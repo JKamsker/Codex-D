@@ -188,7 +188,7 @@ public sealed class StatusCommand : AsyncCommand<StatusCommand.Settings>
         }
         catch (Exception ex)
         {
-            AnsiConsole.MarkupLine($"[red]Failed to query runner:[/] {ex.Message}");
+            AnsiConsole.MarkupLine($"[red]Failed to query runner:[/] {Markup.Escape(ex.Message ?? string.Empty)}");
             return;
         }
 
@@ -249,4 +249,3 @@ public sealed class StatusCommand : AsyncCommand<StatusCommand.Settings>
         return int.TryParse(raw, out var i) ? i : null;
     }
 }
-

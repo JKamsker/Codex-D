@@ -61,7 +61,7 @@ public sealed class InterruptCommand : AsyncCommand<InterruptCommand.Settings>
         }
         catch (Exception ex)
         {
-            AnsiConsole.MarkupLine($"[red]Failed to interrupt run:[/] {ex.Message}");
+            AnsiConsole.MarkupLine($"[red]Failed to interrupt run:[/] {Markup.Escape(ex.Message ?? string.Empty)}");
             return 1;
         }
 
@@ -83,4 +83,3 @@ public sealed class InterruptCommand : AsyncCommand<InterruptCommand.Settings>
         Console.Out.WriteLine(json);
     }
 }
-

@@ -171,6 +171,105 @@ public sealed class RunnerHttpServerTests
     }
 
     [Fact]
+    public async Task Stop_PausesRun_AndEmitsRunPaused()
+    {
+        var exec = new CoordinatedExecutor();
+        await using var host = await RunnerHttpTestHost.StartAsync(requireAuth: false, exec);
+        using var sdk = host.CreateSdkClient(includeToken: false);
+
+        var cwd = Path.Combine(host.StateDir, "repo");
+        Directory.CreateDirectory(cwd);
+
+        var created = await sdk.CreateRunAsync(new CreateRunRequest { Cwd = cwd, Prompt = "hi", Model = null, Sandbox = null, ApprovalPolicy = "never" }, CancellationToken.None);
+        var runId = created.RunId;
+
+        await exec.FirstPublished.Task;
+
+        await sdk.StopAsync(runId, CancellationToken.None);
+
+        await WaitForEventAsync(sdk, runId, "run.paused", TimeSpan.FromSeconds(5));
+
+        var run = await sdk.GetRunAsync(runId, CancellationToken.None);
+        Assert.Equal(RunStatuses.Paused, run.Status);
+    }
+
+    [Fact]
+    public async Task Resume_RestartsExecution_AndCompletes()
+    {
+        var exec = new StopThenSucceedExecutor();
+        await using var host = await RunnerHttpTestHost.StartAsync(requireAuth: false, exec);
+        using var sdk = host.CreateSdkClient(includeToken: false);
+
+        var cwd = Path.Combine(host.StateDir, "repo");
+        Directory.CreateDirectory(cwd);
+
+        var created = await sdk.CreateRunAsync(new CreateRunRequest { Cwd = cwd, Prompt = "hi", Model = null, Sandbox = null, ApprovalPolicy = "never" }, CancellationToken.None);
+        var runId = created.RunId;
+
+        await exec.FirstStarted.Task;
+
+        await sdk.StopAsync(runId, CancellationToken.None);
+        await WaitForEventAsync(sdk, runId, "run.paused", TimeSpan.FromSeconds(5));
+
+        await sdk.ResumeAsync(runId, prompt: "continue", CancellationToken.None);
+        await WaitForEventAsync(sdk, runId, "run.completed", TimeSpan.FromSeconds(5));
+
+        var completed = await sdk.GetRunAsync(runId, CancellationToken.None);
+        Assert.Equal(RunStatuses.Succeeded, completed.Status);
+    }
+
+    [Fact]
+    public async Task Sse_RawReplay_DoesNotTreatHistoricalRunPausedAsTerminalAfterResume()
+    {
+        var exec = new StopThenBlockThenSucceedExecutor();
+        await using var host = await RunnerHttpTestHost.StartAsync(requireAuth: false, exec, persistRawEvents: true);
+        using var sdk = host.CreateSdkClient(includeToken: false);
+
+        var cwd = Path.Combine(host.StateDir, "repo");
+        Directory.CreateDirectory(cwd);
+
+        var created = await sdk.CreateRunAsync(new CreateRunRequest { Cwd = cwd, Prompt = "hi", Model = null, Sandbox = null, ApprovalPolicy = "never" }, CancellationToken.None);
+        var runId = created.RunId;
+
+        await exec.FirstStarted.Task;
+
+        await sdk.StopAsync(runId, CancellationToken.None);
+        await WaitForEventAsync(sdk, runId, "run.paused", TimeSpan.FromSeconds(5));
+
+        await sdk.ResumeAsync(runId, prompt: "continue", CancellationToken.None);
+        await exec.SecondStarted.Task;
+
+        var attached = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var sawCompleted = false;
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+
+        var consumeTask = Task.Run(async () =>
+        {
+            await foreach (var e in sdk.GetEventsAsync(runId, replay: true, follow: true, tail: null, cts.Token))
+            {
+                if (e.Name == "run.meta")
+                {
+                    attached.TrySetResult();
+                }
+
+                if (e.Name == "run.completed")
+                {
+                    sawCompleted = true;
+                    break;
+                }
+            }
+        }, cts.Token);
+
+        await Task.WhenAny(attached.Task, Task.Delay(TimeSpan.FromSeconds(2), cts.Token));
+        Assert.True(attached.Task.IsCompleted);
+
+        exec.AllowFinish.TrySetResult();
+
+        await consumeTask;
+        Assert.True(sawCompleted);
+    }
+
+    [Fact]
     public async Task Sse_Tail_RejectsInvalidValues()
     {
         await using var host = await RunnerHttpTestHost.StartAsync(requireAuth: false, new ImmediateSuccessExecutor());
@@ -240,11 +339,26 @@ public sealed class RunnerHttpServerTests
         var store = host.App.Services.GetRequiredService<RunStore>();
         var dir = await store.TryResolveRunDirectoryAsync(runId, CancellationToken.None);
         Assert.NotNull(dir);
-        Assert.True(File.Exists(Path.Combine(dir!, "rollup.jsonl")));
-        Assert.False(File.Exists(Path.Combine(dir!, "events.jsonl"))); // default is rollup-only
+        Assert.False(File.Exists(Path.Combine(dir!, "rollup.jsonl")));
+        Assert.False(File.Exists(Path.Combine(dir!, "events.jsonl"))); // default is in-memory only
 
-        var rollup = await store.ReadRollupAsync(runId, tail: null, CancellationToken.None);
-        Assert.Contains(rollup, r => r.Type == "outputLine" && r.Text == "partial" && r.EndsWithNewline == false);
+        var outputLines = new List<JsonElement>();
+        await foreach (var e in sdk.GetEventsAsync(runId, replay: true, follow: false, tail: null, replayFormat: "rollup", CancellationToken.None))
+        {
+            if (e.Name == "codex.rollup.outputLine")
+            {
+                using var doc = JsonDocument.Parse(e.Data);
+                outputLines.Add(doc.RootElement.Clone());
+            }
+        }
+
+        Assert.Contains(outputLines, r =>
+            r.TryGetProperty("text", out var t) &&
+            t.ValueKind == JsonValueKind.String &&
+            t.GetString() == "partial" &&
+            r.TryGetProperty("endsWithNewline", out var n) &&
+            (n.ValueKind == JsonValueKind.True || n.ValueKind == JsonValueKind.False) &&
+            n.GetBoolean() == false);
     }
 
     [Fact]
@@ -260,13 +374,7 @@ public sealed class RunnerHttpServerTests
         var runId = created.RunId;
         await WaitForTerminalAsync(sdk, runId, TimeSpan.FromSeconds(2));
 
-        var store = host.App.Services.GetRequiredService<RunStore>();
-        var rollup = await store.ReadRollupAsync(runId, tail: null, CancellationToken.None);
-
-        var lines = rollup
-            .Where(r => r.Type == "outputLine" && r.IsControl != true)
-            .Select(r => r.Text)
-            .ToList();
+        var lines = await ReadRollupOutputLinesAsync(sdk, runId);
 
         Assert.Equal(["a", "b"], lines);
     }
@@ -284,13 +392,7 @@ public sealed class RunnerHttpServerTests
         var runId = created.RunId;
         await WaitForTerminalAsync(sdk, runId, TimeSpan.FromSeconds(2));
 
-        var store = host.App.Services.GetRequiredService<RunStore>();
-        var rollup = await store.ReadRollupAsync(runId, tail: null, CancellationToken.None);
-
-        var lines = rollup
-            .Where(r => r.Type == "outputLine" && r.IsControl != true)
-            .Select(r => r.Text)
-            .ToList();
+        var lines = await ReadRollupOutputLinesAsync(sdk, runId);
 
         Assert.Equal(["a", "b"], lines);
     }
@@ -308,13 +410,24 @@ public sealed class RunnerHttpServerTests
         var runId = created.RunId;
         await WaitForTerminalAsync(sdk, runId, TimeSpan.FromSeconds(2));
 
-        var store = host.App.Services.GetRequiredService<RunStore>();
-        var rollup = await store.ReadRollupAsync(runId, tail: null, CancellationToken.None);
+        var outputLines = new List<JsonElement>();
+        await foreach (var e in sdk.GetEventsAsync(runId, replay: true, follow: false, tail: null, replayFormat: "rollup", CancellationToken.None))
+        {
+            if (e.Name == "codex.rollup.outputLine")
+            {
+                using var doc = JsonDocument.Parse(e.Data);
+                var root = doc.RootElement.Clone();
+                if (root.TryGetProperty("isControl", out var isCtrl) && isCtrl.ValueKind == JsonValueKind.True)
+                {
+                    continue;
+                }
+                outputLines.Add(root);
+            }
+        }
 
-        var outputLines = rollup.Where(r => r.Type == "outputLine" && r.IsControl != true).ToList();
         Assert.Single(outputLines);
-        Assert.Equal("hello", outputLines[0].Text);
-        Assert.True(outputLines[0].EndsWithNewline);
+        Assert.Equal("hello", outputLines[0].GetProperty("text").GetString());
+        Assert.True(outputLines[0].GetProperty("endsWithNewline").GetBoolean());
     }
 
     [Fact]
@@ -350,13 +463,22 @@ public sealed class RunnerHttpServerTests
         var runId = created.RunId;
         await WaitForTerminalAsync(sdk, runId, TimeSpan.FromSeconds(2));
 
-        var store = host.App.Services.GetRequiredService<RunStore>();
-        var rollup = await store.ReadRollupAsync(runId, tail: null, CancellationToken.None);
+        var rollup = new List<JsonElement>();
+        await foreach (var e in sdk.GetEventsAsync(runId, replay: true, follow: false, tail: null, replayFormat: "rollup", CancellationToken.None))
+        {
+            if (e.Name != "codex.rollup.outputLine")
+            {
+                continue;
+            }
 
-        Assert.Contains(rollup, r => r.Type == "outputLine" && r.IsControl == true && string.Equals(r.Text, "thinking", StringComparison.OrdinalIgnoreCase));
-        Assert.Contains(rollup, r => r.Type == "outputLine" && r.IsControl == true && string.Equals(r.Text, "final", StringComparison.OrdinalIgnoreCase));
-        Assert.Contains(rollup, r => r.Type == "outputLine" && r.IsControl != true && r.Text == "**Phase 1**");
-        Assert.Contains(rollup, r => r.Type == "outputLine" && r.IsControl != true && r.Text == "**Phase 2**");
+            using var doc = JsonDocument.Parse(e.Data);
+            rollup.Add(doc.RootElement.Clone());
+        }
+
+        Assert.Contains(rollup, r => r.GetProperty("isControl").GetBoolean() && string.Equals(r.GetProperty("text").GetString(), "thinking", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(rollup, r => r.GetProperty("isControl").GetBoolean() && string.Equals(r.GetProperty("text").GetString(), "final", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(rollup, r => r.GetProperty("isControl").ValueKind != JsonValueKind.True && r.GetProperty("text").GetString() == "**Phase 1**");
+        Assert.Contains(rollup, r => r.GetProperty("isControl").ValueKind != JsonValueKind.True && r.GetProperty("text").GetString() == "**Phase 2**");
     }
 
     [Fact]
@@ -372,11 +494,14 @@ public sealed class RunnerHttpServerTests
         var runId = created.RunId;
         await WaitForTerminalAsync(sdk, runId, TimeSpan.FromSeconds(2));
 
-        var store = host.App.Services.GetRequiredService<RunStore>();
-        var dir = await store.TryResolveRunDirectoryAsync(runId, CancellationToken.None);
-        Assert.NotNull(dir);
+        var events = new List<SseEvent>();
+        await foreach (var e in sdk.GetEventsAsync(runId, replay: true, follow: false, tail: null, replayFormat: "rollup", CancellationToken.None))
+        {
+            events.Add(e);
+        }
 
-        Assert.False(File.Exists(Path.Combine(dir!, "rollup.jsonl")));
+        Assert.DoesNotContain(events, e => e.Name == "codex.rollup.outputLine");
+        Assert.DoesNotContain(events, e => e.Name == "codex.rollup.agentMessage");
     }
 
     [Fact]
@@ -464,7 +589,7 @@ public sealed class RunnerHttpServerTests
 
         var consumeTask = Task.Run(async () =>
         {
-            await foreach (var e in sdk.GetEventsAsync(runId, replay: true, follow: true, tail: null, replayFormat: "auto", cts.Token))
+            await foreach (var e in sdk.GetEventsAsync(runId, replay: true, follow: true, tail: null, replayFormat: "raw", cts.Token))
             {
                 seen.Add(e);
                 if (e.Name == "codex.notification" && e.Data.Contains("early", StringComparison.Ordinal))
@@ -497,7 +622,7 @@ public sealed class RunnerHttpServerTests
     }
 
     [Fact]
-    public async Task Sse_ReplayFormat_Auto_PrefersRaw_WhenRawEventsArePersisted()
+    public async Task Sse_ReplayFormat_Auto_PrefersRollup_WhenRolloutIsAvailable()
     {
         await using var host = await RunnerHttpTestHost.StartAsync(requireAuth: false, new ImmediateSuccessExecutor(), persistRawEvents: true);
         using var sdk = host.CreateSdkClient(includeToken: false);
@@ -513,7 +638,7 @@ public sealed class RunnerHttpServerTests
         var dir = await store.TryResolveRunDirectoryAsync(runId, CancellationToken.None);
         Assert.NotNull(dir);
         Assert.True(File.Exists(Path.Combine(dir!, "events.jsonl")));
-        Assert.True(File.Exists(Path.Combine(dir!, "rollup.jsonl")));
+        Assert.False(File.Exists(Path.Combine(dir!, "rollup.jsonl")));
 
         var events = new List<SseEvent>();
         await foreach (var e in sdk.GetEventsAsync(runId, replay: true, follow: false, tail: null, replayFormat: "auto", CancellationToken.None))
@@ -521,8 +646,8 @@ public sealed class RunnerHttpServerTests
             events.Add(e);
         }
 
-        Assert.Contains(events, e => e.Name == "codex.notification");
-        Assert.DoesNotContain(events, e => e.Name == "codex.rollup.outputLine");
+        Assert.Contains(events, e => e.Name == "codex.rollup.outputLine");
+        Assert.DoesNotContain(events, e => e.Name == "codex.notification");
         Assert.Contains(events, e => e.Name == "run.completed");
     }
 
@@ -636,6 +761,28 @@ public sealed class RunnerHttpServerTests
         Assert.DoesNotContain("ignored", items);
     }
 
+    private static async Task WaitForEventAsync(RunnerClient client, Guid runId, string eventName, TimeSpan timeout)
+    {
+        using var cts = new CancellationTokenSource(timeout);
+
+        try
+        {
+            await foreach (var e in client.GetEventsAsync(runId, replay: true, follow: true, tail: null, cts.Token))
+            {
+                if (e.Name == eventName)
+                {
+                    return;
+                }
+            }
+        }
+        catch (OperationCanceledException) when (cts.IsCancellationRequested)
+        {
+            throw new TimeoutException($"Did not observe {eventName} for {runId:D} within {timeout}.");
+        }
+
+        throw new TimeoutException($"Did not observe {eventName} for {runId:D} within {timeout}.");
+    }
+
     private static async Task WaitForTerminalAsync(RunnerClient client, Guid runId, TimeSpan timeout)
     {
         using var cts = new CancellationTokenSource(timeout);
@@ -650,5 +797,36 @@ public sealed class RunnerHttpServerTests
 
             await Task.Delay(20, cts.Token);
         }
+    }
+
+    private static async Task<List<string>> ReadRollupOutputLinesAsync(RunnerClient client, Guid runId)
+    {
+        var lines = new List<string>();
+        await foreach (var e in client.GetEventsAsync(runId, replay: true, follow: false, tail: null, replayFormat: "rollup", CancellationToken.None))
+        {
+            if (e.Name != "codex.rollup.outputLine")
+            {
+                continue;
+            }
+
+            using var doc = JsonDocument.Parse(e.Data);
+            var root = doc.RootElement;
+
+            if (root.TryGetProperty("isControl", out var isCtrl) && isCtrl.ValueKind == JsonValueKind.True)
+            {
+                continue;
+            }
+
+            if (root.TryGetProperty("text", out var t) && t.ValueKind == JsonValueKind.String)
+            {
+                var text = t.GetString();
+                if (text is not null)
+                {
+                    lines.Add(text);
+                }
+            }
+        }
+
+        return lines;
     }
 }

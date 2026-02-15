@@ -1,0 +1,6 @@
+[submodule "external/codex"]
+	path = external/codex
+	url = https://github.com/openai/codex
+[submodule "external/JKToolKit.CodexSDK"]
+	path = external/JKToolKit.CodexSDK
+	url = https://github.com/JKamsker/JKToolKit.CodexSDK

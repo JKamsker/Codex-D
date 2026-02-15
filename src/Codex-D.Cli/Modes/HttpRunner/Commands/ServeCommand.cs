@@ -55,7 +55,7 @@ public sealed class ServeCommand : AsyncCommand<ServeCommand.Settings>
         public string? StateDir { get; init; }
 
         [CommandOption("--persist-raw-events")]
-        [Description("Persist raw differential events to events.jsonl (debugging). Default: false (rollup only).")]
+        [Description("Persist raw differential events to events.jsonl (debugging). Default: false (in-memory backlog + Codex rollout replay).")]
         public bool PersistRawEvents { get; init; }
     }
 
@@ -273,7 +273,7 @@ public sealed class ServeCommand : AsyncCommand<ServeCommand.Settings>
         }
         catch (Exception ex)
         {
-            AnsiConsole.MarkupLine($"[red]Failed to install daemon binaries:[/] {ex.Message}");
+            AnsiConsole.MarkupLine($"[red]Failed to install daemon binaries:[/] {Markup.Escape(ex.Message ?? string.Empty)}");
             return 1;
         }
 
@@ -297,7 +297,7 @@ public sealed class ServeCommand : AsyncCommand<ServeCommand.Settings>
         }
         catch (Exception ex)
         {
-            AnsiConsole.MarkupLine($"[red]Failed to start daemon child:[/] {ex.Message}");
+            AnsiConsole.MarkupLine($"[red]Failed to start daemon child:[/] {Markup.Escape(ex.Message ?? string.Empty)}");
             return 1;
         }
 

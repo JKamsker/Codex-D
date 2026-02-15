@@ -30,6 +30,15 @@ public static class HttpCli
                 run.AddCommand<InterruptCommand>("interrupt")
                     .WithDescription("Interrupt a running run.");
 
+                run.AddCommand<SteerCommand>("steer")
+                    .WithDescription("Send additional text to an active turn (turn/steer).");
+
+                run.AddCommand<StopCommand>("stop")
+                    .WithDescription("Pause (stop) a running exec run so it can be resumed.");
+
+                run.AddCommand<ResumeCommand>("resume")
+                    .WithDescription("Resume a paused (or orphaned) exec run by starting a new turn (default prompt: \"continue\").");
+
                 run.AddCommand<RunMessagesCommand>("messages")
                     .WithDescription("Print the last completed agent message(s) for a run.");
 
@@ -51,4 +60,3 @@ public static class HttpCli
         });
     }
 }
-

@@ -13,13 +13,14 @@ public sealed record class RunExecutionContext
     public required Guid RunId { get; init; }
     public required string Cwd { get; init; }
     public required string Prompt { get; init; }
+    public string? CodexThreadId { get; init; }
     public string? Kind { get; init; }
     public RunReviewRequest? Review { get; init; }
     public string? Model { get; init; }
     public string? Sandbox { get; init; }
     public string? ApprovalPolicy { get; init; }
     public required Func<string, JsonElement, CancellationToken, Task> PublishNotificationAsync { get; init; }
-    public required Func<string, string?, CancellationToken, Task> SetCodexIdsAsync { get; init; }
+    public required Func<string, string?, string?, CancellationToken, Task> SetCodexIdsAsync { get; init; }
     public required Action<Func<CancellationToken, Task>> SetInterrupt { get; init; }
 }
 

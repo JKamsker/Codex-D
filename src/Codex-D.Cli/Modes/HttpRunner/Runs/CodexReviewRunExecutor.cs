@@ -1,7 +1,9 @@
 using System.Text;
 using System.Text.Json;
 using CodexD.HttpRunner.Contracts;
+using JKToolKit.CodexSDK.AppServer;
 using JKToolKit.CodexSDK.Exec;
+using JKToolKit.CodexSDK.Models;
 using Microsoft.Extensions.Logging;
 using System.Threading.Channels;
 
@@ -12,17 +14,31 @@ public sealed class CodexReviewRunExecutor : IRunExecutor
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
     private const int FlushThresholdChars = 2048;
 
+    private readonly ICodexAppServerClientFactory _appServer;
     private readonly ILogger<CodexReviewRunExecutor> _logger;
 
-    public CodexReviewRunExecutor(ILogger<CodexReviewRunExecutor> logger)
+    public CodexReviewRunExecutor(
+        ICodexAppServerClientFactory appServer,
+        ILogger<CodexReviewRunExecutor> logger)
     {
+        _appServer = appServer;
         _logger = logger;
     }
 
     public async Task<RunExecutionResult> ExecuteAsync(RunExecutionContext context, CancellationToken ct)
     {
-        var review = context.Review ?? new RunReviewRequest { Uncommitted = true };
+        var review = context.Review ?? new RunReviewRequest { Uncommitted = true, Mode = "exec" };
+        var mode = NormalizeMode(review.Mode);
 
+        return mode switch
+        {
+            ReviewExecutionMode.AppServer => await ExecuteAppServerAsync(context, review, ct),
+            _ => await ExecuteExecAsync(context, review, ct)
+        };
+    }
+
+    private async Task<RunExecutionResult> ExecuteExecAsync(RunExecutionContext context, RunReviewRequest review, CancellationToken ct)
+    {
         var interruptCts = new CancellationTokenSource();
         context.SetInterrupt(_ =>
         {
@@ -96,6 +112,70 @@ public sealed class CodexReviewRunExecutor : IRunExecutor
         }
     }
 
+    private async Task<RunExecutionResult> ExecuteAppServerAsync(RunExecutionContext context, RunReviewRequest review, CancellationToken ct)
+    {
+        if (review.AdditionalOptions is { Length: > 0 })
+        {
+            return new RunExecutionResult
+            {
+                Status = RunStatuses.Failed,
+                Error = "App-server review does not support AdditionalOptions. Use review.mode=exec or omit extra args."
+            };
+        }
+
+        var delivery = ParseDelivery(review.Delivery);
+
+        var model = ResolveModelOrDefault(context.Model);
+        var sandbox = ResolveSandboxOrDefault(context.Sandbox);
+        var approvalPolicy = ResolveApprovalPolicyOrDefault(context.ApprovalPolicy);
+
+        await using var client = await _appServer.StartAsync(ct);
+
+        var instructions = string.IsNullOrWhiteSpace(context.Prompt) ? null : context.Prompt.Trim();
+
+        var thread = await client.StartThreadAsync(
+            new ThreadStartOptions
+            {
+                Cwd = context.Cwd,
+                Model = model,
+                Sandbox = sandbox,
+                ApprovalPolicy = approvalPolicy,
+                Ephemeral = false,
+                DeveloperInstructions = instructions
+            },
+            ct);
+
+        var rolloutPath = CodexThreadRolloutPathExtractor.TryExtract(thread.Raw);
+        await context.SetCodexIdsAsync(thread.Id, null, rolloutPath, ct);
+
+        await context.PublishNotificationAsync(
+            "item/agentMessage/delta",
+            JsonSerializer.SerializeToElement(new { delta = "Starting review...\n" }, Json),
+            ct);
+
+        var target = BuildReviewTarget(review);
+
+        await using var turn = (await client.StartReviewAsync(
+            new ReviewStartOptions
+            {
+                ThreadId = thread.Id,
+                Delivery = delivery,
+                Target = target
+            },
+            ct)).Turn;
+
+        context.SetInterrupt(c => turn.InterruptAsync(c));
+        await context.SetCodexIdsAsync(turn.ThreadId, turn.TurnId, rolloutPath, ct);
+
+        await foreach (var notification in turn.Events(ct))
+        {
+            await context.PublishNotificationAsync(notification.Method, notification.Params, ct);
+        }
+
+        var completed = await turn.Completion;
+        return MapCompletion(completed);
+    }
+
     private static string? LimitError(string? error)
     {
         if (string.IsNullOrWhiteSpace(error))
@@ -106,6 +186,127 @@ public sealed class CodexReviewRunExecutor : IRunExecutor
         error = error.Trim();
         const int max = 64 * 1024;
         return error.Length <= max ? error : error[..max];
+    }
+
+    private static ReviewDelivery? ParseDelivery(string? raw)
+    {
+        raw = raw?.Trim();
+        if (string.IsNullOrWhiteSpace(raw))
+        {
+            return null;
+        }
+
+        return raw.ToLowerInvariant() switch
+        {
+            "inline" => ReviewDelivery.Inline,
+            "detached" => ReviewDelivery.Detached,
+            _ => throw new ArgumentException("Invalid review delivery. Use 'inline' or 'detached'.", nameof(raw))
+        };
+    }
+
+    private static ReviewTarget BuildReviewTarget(RunReviewRequest review)
+    {
+        if (review.Uncommitted)
+        {
+            return new ReviewTarget.UncommittedChanges();
+        }
+
+        if (!string.IsNullOrWhiteSpace(review.BaseBranch))
+        {
+            return new ReviewTarget.BaseBranch(review.BaseBranch.Trim());
+        }
+
+        if (!string.IsNullOrWhiteSpace(review.CommitSha))
+        {
+            var sha = review.CommitSha.Trim();
+            var title = string.IsNullOrWhiteSpace(review.Title) ? null : review.Title.Trim();
+            return new ReviewTarget.Commit(sha, title);
+        }
+
+        return new ReviewTarget.UncommittedChanges();
+    }
+
+    private static CodexModel ResolveModelOrDefault(string? raw)
+    {
+        if (string.IsNullOrWhiteSpace(raw))
+        {
+            return CodexModel.Default;
+        }
+
+        raw = raw.Trim();
+        if (raw.Length == 0)
+        {
+            return CodexModel.Default;
+        }
+
+        return CodexModel.Parse(raw);
+    }
+
+    private static CodexSandboxMode ResolveSandboxOrDefault(string? raw)
+    {
+        raw = raw?.Trim();
+        if (CodexSandboxMode.TryParse(raw, out var mode))
+        {
+            return mode;
+        }
+
+        return CodexSandboxMode.WorkspaceWrite;
+    }
+
+    private static CodexApprovalPolicy ResolveApprovalPolicyOrDefault(string? raw)
+    {
+        raw = raw?.Trim();
+        if (CodexApprovalPolicy.TryParse(raw, out var policy))
+        {
+            return policy;
+        }
+
+        return CodexApprovalPolicy.Never;
+    }
+
+    private RunExecutionResult MapCompletion(JKToolKit.CodexSDK.AppServer.Notifications.TurnCompletedNotification completed)
+    {
+        var status = completed.Status?.Trim().ToLowerInvariant() switch
+        {
+            "completed" => RunStatuses.Succeeded,
+            "failed" => RunStatuses.Failed,
+            "interrupted" => RunStatuses.Interrupted,
+            _ => RunStatuses.Succeeded
+        };
+
+        string? error = null;
+        try
+        {
+            error = completed.Error?.GetRawText();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "Failed to serialize turn error payload.");
+        }
+
+        return new RunExecutionResult { Status = status, Error = error };
+    }
+
+    private enum ReviewExecutionMode
+    {
+        Exec,
+        AppServer
+    }
+
+    private static ReviewExecutionMode NormalizeMode(string? raw)
+    {
+        raw = raw?.Trim();
+        if (string.IsNullOrWhiteSpace(raw))
+        {
+            return ReviewExecutionMode.Exec;
+        }
+
+        return raw.ToLowerInvariant() switch
+        {
+            "appserver" => ReviewExecutionMode.AppServer,
+            "app-server" => ReviewExecutionMode.AppServer,
+            _ => ReviewExecutionMode.Exec
+        };
     }
 
     private sealed class StreamingNotificationTextWriter : TextWriter

@@ -30,6 +30,9 @@ public static class HttpCli
                 run.AddCommand<InterruptCommand>("interrupt")
                     .WithDescription("Interrupt a running run.");
 
+                run.AddCommand<SteerCommand>("steer")
+                    .WithDescription("Send additional text to an active turn (turn/steer).");
+
                 run.AddCommand<StopCommand>("stop")
                     .WithDescription("Pause (stop) a running exec run so it can be resumed.");
 

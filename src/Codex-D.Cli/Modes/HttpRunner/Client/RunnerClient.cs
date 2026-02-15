@@ -139,6 +139,23 @@ public sealed class RunnerClient : IDisposable
         return new CreateRunResponse { RunId = resumedRunId, Status = status };
     }
 
+    public async Task SteerAsync(Guid runId, string prompt, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(prompt))
+        {
+            throw new ArgumentException("prompt is required", nameof(prompt));
+        }
+
+        var body = JsonSerializer.Serialize(new SteerRunRequest { Prompt = prompt }, Json);
+        using var content = new StringContent(body, Encoding.UTF8, "application/json");
+        using var res = await _http.PostAsync($"{_baseUrl}/v1/runs/{runId:D}/steer", content, ct);
+        if (!res.IsSuccessStatusCode)
+        {
+            var text = await res.Content.ReadAsStringAsync(ct);
+            throw new InvalidOperationException($"HTTP {(int)res.StatusCode}: {text}");
+        }
+    }
+
     public async Task<IReadOnlyList<string>> GetRunMessagesAsync(Guid runId, int count, int? tailEvents, CancellationToken ct)
     {
         if (count <= 0)

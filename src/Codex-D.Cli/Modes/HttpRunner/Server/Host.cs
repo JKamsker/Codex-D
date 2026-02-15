@@ -6,6 +6,7 @@ using CodexD.Shared.Paths;
 using CodexD.HttpRunner.Runs;
 using JKToolKit.CodexSDK.AppServer;
 using JKToolKit.CodexSDK.AppServer.ApprovalHandlers;
+using JKToolKit.CodexSDK.AppServer.Protocol.V2;
 using JKToolKit.CodexSDK.AppServer.Resiliency;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
@@ -74,6 +75,14 @@ public static class Host
                     version: typeof(Host).Assembly.GetName().Version?.ToString() ?? "0.0.0");
 
                 options.ApprovalHandler = new AlwaysDenyHandler();
+
+                var experimentalApi = Environment.GetEnvironmentVariable("CODEX_D_EXPERIMENTAL_API")?.Trim();
+                if (!string.IsNullOrWhiteSpace(experimentalApi) &&
+                    bool.TryParse(experimentalApi, out var enableExperimental) &&
+                    enableExperimental)
+                {
+                    options.ExperimentalApi = true;
+                }
 
                 // Keep parity with the API host’s override mechanism (optional).
                 var sandboxPermissions = Environment.GetEnvironmentVariable("CODEXWEBUI_CODEX_SANDBOX_PERMISSIONS")?.Trim();
@@ -292,6 +301,54 @@ public static class Host
                 ? Results.NotFound(new { error = "not_found_or_not_resumable" })
                 : Results.Ok(new { runId = resumed.RunId, status = resumed.Status });
         });
+
+        if (enableCodexRuntime)
+        {
+            app.MapPost("/v1/runs/{runId:guid}/steer", async (
+                Guid runId,
+                SteerRunRequest? request,
+                RunStore store,
+                CodexD.HttpRunner.CodexRuntime.IAppServerClientProvider codex,
+                CancellationToken ct) =>
+            {
+                if (request is null || string.IsNullOrWhiteSpace(request.Prompt))
+                {
+                    return Results.BadRequest(new { error = "prompt_required" });
+                }
+
+                var record = await store.TryGetAsync(runId, ct);
+                if (record is null)
+                {
+                    return Results.NotFound(new { error = "not_found" });
+                }
+
+                if (string.IsNullOrWhiteSpace(record.CodexThreadId) || string.IsNullOrWhiteSpace(record.CodexTurnId))
+                {
+                    return Results.Conflict(new { error = "run_missing_codex_ids" });
+                }
+
+                var client = await codex.GetClientAsync(ct);
+
+                try
+                {
+                    await client.CallAsync(
+                        "turn/steer",
+                        new TurnSteerParams
+                        {
+                            ThreadId = record.CodexThreadId,
+                            ExpectedTurnId = record.CodexTurnId,
+                            Input = new object[] { TurnInputItem.Text(request.Prompt.Trim()).Wire }
+                        },
+                        ct);
+
+                    return Results.Ok(new { status = "ok" });
+                }
+                catch (Exception ex)
+                {
+                    return Results.BadRequest(new { error = "steer_failed", message = ex.Message });
+                }
+            });
+        }
 
         app.MapGet("/v1/runs/{runId:guid}/messages", async (Guid runId, HttpRequest req, RunStore store, CancellationToken ct) =>
         {

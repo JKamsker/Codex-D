@@ -73,6 +73,21 @@ public sealed class RunNotificationBacklog
         }
     }
 
+    public IReadOnlyList<RunEventEnvelope> SnapshotPending(Guid runId)
+    {
+        if (!_states.TryGetValue(runId, out var state))
+        {
+            return Array.Empty<RunEventEnvelope>();
+        }
+
+        lock (state.Gate)
+        {
+            TryRefreshMaterializationLocked(state);
+            PruneLocked(state);
+            return state.Events.ToArray();
+        }
+    }
+
     private static void TryRefreshMaterializationLocked(BacklogState state)
     {
         if (string.IsNullOrWhiteSpace(state.RolloutPath))

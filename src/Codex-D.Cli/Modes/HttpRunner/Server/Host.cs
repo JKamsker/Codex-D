@@ -382,9 +382,11 @@ public static class Host
             tailEvents = Math.Min(tailEvents, 200000);
 
             var queue = new Queue<object>(Math.Min(count, 50));
+            DateTimeOffset? maxNotificationAt = null;
 
             var dir = await store.TryResolveRunDirectoryAsync(runId, ct);
-            if (dir is not null && HasRawEventsFile(dir))
+            var hasRawEvents = dir is not null && HasRawEventsFile(dir);
+            if (hasRawEvents)
             {
                 var events = await store.ReadRawEventsAsync(runId, tailEvents, ct);
                 foreach (var env in events)
@@ -394,6 +396,7 @@ public static class Host
                         continue;
                     }
 
+                    maxNotificationAt = maxNotificationAt is null || env.CreatedAt > maxNotificationAt.Value ? env.CreatedAt : maxNotificationAt;
                     if (!RunEventDataExtractors.TryGetCompletedAgentMessageText(env.Data, out var text) ||
                         string.IsNullOrWhiteSpace(text))
                     {
@@ -424,35 +427,42 @@ public static class Host
                         queue.Enqueue(new { createdAt = item.CreatedAt, text = item.Text });
                     }
                 }
-                else
+            }
+
+            IReadOnlyList<RunEventEnvelope> snapshot;
+            if (hasRawEvents)
+            {
+                snapshot = backlog.SnapshotAfter(runId, maxNotificationAt);
+            }
+            else
+            {
+                snapshot = backlog.SnapshotPending(runId);
+            }
+
+            if (snapshot.Count > tailEvents)
+            {
+                snapshot = snapshot.Skip(snapshot.Count - tailEvents).ToArray();
+            }
+
+            foreach (var env in snapshot)
+            {
+                if (!string.Equals(env.Type, "codex.notification", StringComparison.Ordinal))
                 {
-                    var snapshot = backlog.SnapshotAfter(runId, afterExclusive: null);
-                    if (snapshot.Count > tailEvents)
-                    {
-                        snapshot = snapshot.Skip(snapshot.Count - tailEvents).ToArray();
-                    }
-
-                    foreach (var env in snapshot)
-                    {
-                        if (!string.Equals(env.Type, "codex.notification", StringComparison.Ordinal))
-                        {
-                            continue;
-                        }
-
-                        if (!RunEventDataExtractors.TryGetCompletedAgentMessageText(env.Data, out var text) ||
-                            string.IsNullOrWhiteSpace(text))
-                        {
-                            continue;
-                        }
-
-                        if (queue.Count == count)
-                        {
-                            queue.Dequeue();
-                        }
-
-                        queue.Enqueue(new { createdAt = env.CreatedAt, text });
-                    }
+                    continue;
                 }
+
+                if (!RunEventDataExtractors.TryGetCompletedAgentMessageText(env.Data, out var text) ||
+                    string.IsNullOrWhiteSpace(text))
+                {
+                    continue;
+                }
+
+                if (queue.Count == count)
+                {
+                    queue.Dequeue();
+                }
+
+                queue.Enqueue(new { createdAt = env.CreatedAt, text });
             }
 
             return Results.Ok(new { items = queue.ToArray() });
@@ -475,16 +485,35 @@ public static class Host
             tailEvents = Math.Min(tailEvents, 200000);
 
             var dir = await store.TryResolveRunDirectoryAsync(runId, ct);
-            if (dir is not null && HasRawEventsFile(dir))
+            var hasRawEvents = dir is not null && HasRawEventsFile(dir);
+            if (hasRawEvents)
             {
-                var summaries = ThinkingSummaries.FromRawEvents(await store.ReadRawEventsAsync(runId, tailEvents, ct));
+                var raw = await store.ReadRawEventsAsync(runId, tailEvents, ct);
+                var maxNotificationAt = raw.Where(e => string.Equals(e.Type, "codex.notification", StringComparison.Ordinal))
+                    .Select(e => (DateTimeOffset?)e.CreatedAt)
+                    .Max();
+
+                var pending = backlog.SnapshotAfter(runId, maxNotificationAt);
+                if (pending.Count > tailEvents)
+                {
+                    pending = pending.Skip(pending.Count - tailEvents).ToArray();
+                }
+
+                var combined = raw.Concat(pending).ToArray();
+                var summaries = ThinkingSummaries.FromRawEvents(combined);
                 return Results.Ok(new { items = summaries });
             }
 
             var rolloutPath = CodexRolloutPathNormalizer.Normalize(record.CodexRolloutPath);
             if (!string.IsNullOrWhiteSpace(rolloutPath) && File.Exists(rolloutPath))
             {
-                var summaries = ThinkingSummaries.FromCodexRollout(rolloutPath, tailEvents, ct);
+                var pending = backlog.SnapshotPending(runId);
+                if (pending.Count > tailEvents)
+                {
+                    pending = pending.Skip(pending.Count - tailEvents).ToArray();
+                }
+
+                var summaries = ThinkingSummaries.FromCodexRolloutThenRawEvents(rolloutPath, pending, ct);
                 return Results.Ok(new { items = summaries });
             }
 

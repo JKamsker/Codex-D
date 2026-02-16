@@ -804,6 +804,48 @@ public sealed class RunnerHttpServerTests
         Assert.DoesNotContain("ignored", items);
     }
 
+    [Fact]
+    public async Task RunMessages_CombinesRolloutAndPendingBacklog()
+    {
+        await using var host = await RunnerHttpTestHost.StartAsync(requireAuth: false, new PartialRolloutMaterializationExecutor(), persistRawEvents: false);
+        using var sdk = host.CreateSdkClient(includeToken: false);
+        using var http = host.CreateHttpClient(includeToken: false);
+
+        var cwd = Path.Combine(host.StateDir, "repo");
+        Directory.CreateDirectory(cwd);
+
+        var created = await sdk.CreateRunAsync(new CreateRunRequest { Cwd = cwd, Prompt = "hi", Model = null, Sandbox = null, ApprovalPolicy = "never" }, CancellationToken.None);
+        var runId = created.RunId;
+        await WaitForTerminalAsync(sdk, runId, TimeSpan.FromSeconds(2));
+
+        var json = await http.GetFromJsonAsync<JsonElement>($"/v1/runs/{runId:D}/messages?count=2");
+        var items = json.GetProperty("items").EnumerateArray().ToList();
+        Assert.Equal(2, items.Count);
+        Assert.Equal("two", items[0].GetProperty("text").GetString());
+        Assert.Equal("three", items[1].GetProperty("text").GetString());
+    }
+
+    [Fact]
+    public async Task ThinkingSummaries_CombinesRolloutAndPendingBacklog()
+    {
+        await using var host = await RunnerHttpTestHost.StartAsync(requireAuth: false, new PartialRolloutMaterializationExecutor(), persistRawEvents: false);
+        using var sdk = host.CreateSdkClient(includeToken: false);
+        using var http = host.CreateHttpClient(includeToken: false);
+
+        var cwd = Path.Combine(host.StateDir, "repo");
+        Directory.CreateDirectory(cwd);
+
+        var created = await sdk.CreateRunAsync(new CreateRunRequest { Cwd = cwd, Prompt = "hi", Model = null, Sandbox = null, ApprovalPolicy = "never" }, CancellationToken.None);
+        var runId = created.RunId;
+        await WaitForTerminalAsync(sdk, runId, TimeSpan.FromSeconds(2));
+
+        var json = await http.GetFromJsonAsync<JsonElement>($"/v1/runs/{runId:D}/thinking-summaries");
+        var items = json.GetProperty("items").EnumerateArray().Select(x => x.GetString()).Where(x => x is not null).ToList();
+
+        Assert.Contains("Phase 1", items);
+        Assert.Contains("Phase 2", items);
+    }
+
     private static async Task WaitForEventAsync(RunnerClient client, Guid runId, string eventName, TimeSpan timeout)
     {
         using var cts = new CancellationTokenSource(timeout);

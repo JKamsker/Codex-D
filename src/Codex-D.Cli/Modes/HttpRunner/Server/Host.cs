@@ -357,7 +357,7 @@ public static class Host
             });
         }
 
-        app.MapGet("/v1/runs/{runId:guid}/messages", async (Guid runId, HttpRequest req, RunStore store, CancellationToken ct) =>
+        app.MapGet("/v1/runs/{runId:guid}/messages", async (Guid runId, HttpRequest req, RunStore store, RunNotificationBacklog backlog, CancellationToken ct) =>
         {
             var record = await store.TryGetAsync(runId, ct);
             if (record is null)
@@ -424,12 +424,41 @@ public static class Host
                         queue.Enqueue(new { createdAt = item.CreatedAt, text = item.Text });
                     }
                 }
+                else
+                {
+                    var snapshot = backlog.SnapshotAfter(runId, afterExclusive: null);
+                    if (snapshot.Count > tailEvents)
+                    {
+                        snapshot = snapshot.Skip(snapshot.Count - tailEvents).ToArray();
+                    }
+
+                    foreach (var env in snapshot)
+                    {
+                        if (!string.Equals(env.Type, "codex.notification", StringComparison.Ordinal))
+                        {
+                            continue;
+                        }
+
+                        if (!RunEventDataExtractors.TryGetCompletedAgentMessageText(env.Data, out var text) ||
+                            string.IsNullOrWhiteSpace(text))
+                        {
+                            continue;
+                        }
+
+                        if (queue.Count == count)
+                        {
+                            queue.Dequeue();
+                        }
+
+                        queue.Enqueue(new { createdAt = env.CreatedAt, text });
+                    }
+                }
             }
 
             return Results.Ok(new { items = queue.ToArray() });
         });
 
-        app.MapGet("/v1/runs/{runId:guid}/thinking-summaries", async (Guid runId, HttpRequest req, RunStore store, CancellationToken ct) =>
+        app.MapGet("/v1/runs/{runId:guid}/thinking-summaries", async (Guid runId, HttpRequest req, RunStore store, RunNotificationBacklog backlog, CancellationToken ct) =>
         {
             var record = await store.TryGetAsync(runId, ct);
             if (record is null)
@@ -459,7 +488,13 @@ public static class Host
                 return Results.Ok(new { items = summaries });
             }
 
-            return Results.Ok(new { items = Array.Empty<string>() });
+            var snapshot = backlog.SnapshotAfter(runId, afterExclusive: null);
+            if (snapshot.Count > tailEvents)
+            {
+                snapshot = snapshot.Skip(snapshot.Count - tailEvents).ToArray();
+            }
+
+            return Results.Ok(new { items = ThinkingSummaries.FromRawEvents(snapshot) });
         });
 
         app.MapGet("/v1/runs/{runId:guid}/events", async (Guid runId, HttpContext ctx, RunStore store, RunEventBroadcaster broadcaster, RunNotificationBacklog backlog, CodexRolloutRollupReader rolloutReader) =>

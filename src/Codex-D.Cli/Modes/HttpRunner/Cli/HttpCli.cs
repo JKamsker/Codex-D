@@ -57,6 +57,9 @@ public static class HttpCli
 
             http.AddCommand<StatusCommand>("status")
                 .WithDescription("Show runner discovery + health/info (doctor).");
+
+            http.AddCommand<VersionCommand>("version")
+                .WithDescription("Show CLI version and the version of reachable daemon/foreground servers.");
         });
     }
 }

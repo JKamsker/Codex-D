@@ -26,7 +26,7 @@ public sealed class ExecCommand : AsyncCommand<ExecCommand.Settings>
         [CommandOption("--model <MODEL>")]
         public string? Model { get; init; }
 
-        [CommandOption("--effort|--reasoning-effort <EFFORT>")]
+        [CommandOption("-r|--reasoning|--effort|--reasoning-effort <EFFORT>")]
         [Description("Reasoning effort override (e.g. none, minimal, low, medium, high, xhigh).")]
         public string? Effort { get; init; }
 

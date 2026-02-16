@@ -53,7 +53,7 @@ public sealed class ReviewCommand : AsyncCommand<ReviewCommand.Settings>
         [Description("Model the review should use (forwarded to `codex review`).")]
         public string? Model { get; init; }
 
-        [CommandOption("--effort|--reasoning-effort <EFFORT>")]
+        [CommandOption("-r|--reasoning|--effort|--reasoning-effort <EFFORT>")]
         [Description("Reasoning effort override (exec-mode only). Examples: none, minimal, low, medium, high, xhigh.")]
         public string? Effort { get; init; }
 
@@ -155,7 +155,7 @@ public sealed class ReviewCommand : AsyncCommand<ReviewCommand.Settings>
             {
                 if (!string.IsNullOrWhiteSpace(settings.Effort))
                 {
-                    throw new ArgumentException("--effort/--reasoning-effort is only supported with --mode exec.");
+                    throw new ArgumentException("-r/--reasoning is only supported with --mode exec.");
                 }
 
                 if (settings.Config.Length > 0 || settings.Enable.Length > 0 || settings.Disable.Length > 0 || settings.Arg.Length > 0)

@@ -83,7 +83,7 @@ codex-d http exec "Hello"
 Set reasoning effort (applies to this turn and subsequent turns in the run):
 
 ```bash
-codex-d http exec --effort high "Be thorough"
+codex-d http exec --reasoning high "Be thorough"
 ```
 
 ### Run a code review (non-interactive)
@@ -97,7 +97,7 @@ codex-d http review --uncommitted
 Set reasoning effort for the review (exec mode):
 
 ```bash
-codex-d http review --effort high --uncommitted
+codex-d http review --reasoning high --uncommitted
 ```
 
 Review a specific commit:
@@ -147,7 +147,7 @@ codex-d http run resume <RUN_ID>
 Override reasoning effort on resume:
 
 ```bash
-codex-d http run resume --effort low <RUN_ID>
+codex-d http run resume --reasoning low <RUN_ID>
 ```
 
 Inspect a run’s output artifacts:
@@ -155,6 +155,12 @@ Inspect a run’s output artifacts:
 ```bash
 codex-d http run messages <RUN_ID>
 codex-d http run thinking <RUN_ID>
+```
+
+Show CLI + server versions (daemon/foreground):
+
+```bash
+codex-d http version
 ```
 
 Client env vars:

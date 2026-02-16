@@ -36,6 +36,8 @@ public sealed class RunnerHttpServerTests
         Assert.Equal(host.Identity.RunnerId, json.GetProperty("runnerId").GetGuid());
         Assert.Equal(host.Port, json.GetProperty("port").GetInt32());
         Assert.Equal(host.BaseUrl, json.GetProperty("baseUrl").GetString());
+        Assert.True(json.TryGetProperty("informationalVersion", out var informational));
+        Assert.True(informational.ValueKind is JsonValueKind.String or JsonValueKind.Null);
     }
 
     [Fact]

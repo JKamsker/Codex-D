@@ -14,6 +14,7 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Http.Json;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
+using System.Reflection;
 
 namespace CodexD.HttpRunner.Server;
 
@@ -180,7 +181,9 @@ public static class Host
 
         app.MapGet("/v1/info", (HttpRequest req, ServerConfig cfg) =>
         {
-            var version = typeof(Host).Assembly.GetName().Version?.ToString();
+            var asm = typeof(Host).Assembly;
+            var version = asm.GetName().Version?.ToString();
+            var informationalVersion = asm.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion ?? version;
             var host = req.Host.ToUriComponent();
             var baseUrl = string.IsNullOrWhiteSpace(host) ? cfg.BaseUrl : $"{req.Scheme}://{host}";
             var port = req.Host.Port ?? cfg.Port;
@@ -189,6 +192,7 @@ public static class Host
                 startedAtUtc = cfg.StartedAtUtc,
                 runnerId = cfg.Identity.RunnerId,
                 version,
+                informationalVersion,
                 listen = cfg.ListenAddress.ToString(),
                 port,
                 requireAuth = cfg.RequireAuth,

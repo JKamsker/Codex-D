@@ -19,7 +19,7 @@ public sealed class ResumeCommand : AsyncCommand<ResumeCommand.Settings>
         [Description("Prompt text for the resumed turn. Default: \"continue\". Use '-' to read stdin.")]
         public string? PromptOption { get; init; }
 
-        [CommandOption("--effort|--reasoning-effort <EFFORT>")]
+        [CommandOption("-r|--reasoning|--effort|--reasoning-effort <EFFORT>")]
         [Description("Reasoning effort override for the resumed turn (e.g. none, minimal, low, medium, high, xhigh).")]
         public string? Effort { get; init; }
 
@@ -103,7 +103,7 @@ public sealed class ResumeCommand : AsyncCommand<ResumeCommand.Settings>
             WriteError(
                 format,
                 "invalid_effort",
-                $"Invalid --effort value '{raw}'. Valid values: {string.Join(", ", ValidEffortValues)}.");
+                $"Invalid --reasoning value '{raw}'. Valid values: {string.Join(", ", ValidEffortValues)}.");
             return 2;
         }
 

@@ -187,7 +187,6 @@ public sealed class ServeCommand : AsyncCommand<ServeCommand.Settings>
                 runnerId = config.Identity.RunnerId,
                 stateDir = config.StateDirectory,
                 requireAuth = config.RequireAuth,
-                token = config.Identity.Token,
                 listen = config.ListenAddress.ToString(),
                 port = config.Port
             });
@@ -382,6 +381,16 @@ public sealed class ServeCommand : AsyncCommand<ServeCommand.Settings>
         if (settings.PersistRawEvents || (TryGetEnvBool("CODEX_D_PERSIST_RAW_EVENTS") ?? false))
         {
             args.Add("--persist-raw-events");
+        }
+
+        if (settings.Json)
+        {
+            args.Add("--json");
+        }
+        else if (!string.IsNullOrWhiteSpace(settings.OutputFormat))
+        {
+            args.Add("--outputformat");
+            args.Add(settings.OutputFormat.Trim());
         }
 
         try

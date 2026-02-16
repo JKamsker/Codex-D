@@ -12,6 +12,8 @@ public sealed class OutputFormatTests
     [InlineData("json", OutputFormat.Json)]
     [InlineData("jsonl", OutputFormat.Jsonl)]
     [InlineData("ndjson", OutputFormat.Jsonl)]
+    [InlineData("nd_json", OutputFormat.Jsonl)]
+    [InlineData("json-l", OutputFormat.Jsonl)]
     [InlineData("JSONL", OutputFormat.Jsonl)]
     public void Parse_KnownValues(string value, OutputFormat expected)
     {
@@ -54,4 +56,3 @@ public sealed class OutputFormatTests
         Assert.Throws<ArgumentException>(() => OutputFormatParser.Parse("nope"));
     }
 }
-

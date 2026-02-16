@@ -60,7 +60,14 @@ public sealed class ExecCommand : AsyncCommand<ExecCommand.Settings>
         }
         catch (RunnerResolutionFailure ex)
         {
-            Console.Error.WriteLine(ex.UserMessage);
+            if (format != OutputFormat.Human)
+            {
+                CliOutput.WriteJsonError("runner_not_found", ex.UserMessage);
+            }
+            else
+            {
+                Console.Error.WriteLine(ex.UserMessage);
+            }
             return 1;
         }
 
@@ -101,7 +108,7 @@ public sealed class ExecCommand : AsyncCommand<ExecCommand.Settings>
             }
 
             Console.Error.WriteLine(ex.Message);
-            return 1;
+            return 2;
         }
     }
 

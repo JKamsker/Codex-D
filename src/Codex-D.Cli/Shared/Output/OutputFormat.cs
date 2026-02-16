@@ -25,7 +25,10 @@ public static class OutputFormatParser
             throw new ArgumentException("Output format cannot be empty.", nameof(value));
         }
 
-        v = v.Replace("_", "-", StringComparison.Ordinal).ToLowerInvariant();
+        v = v
+            .Replace("_", "", StringComparison.Ordinal)
+            .Replace("-", "", StringComparison.Ordinal)
+            .ToLowerInvariant();
 
         return v switch
         {
@@ -58,4 +61,3 @@ public static class OutputFormatParser
         return OutputFormat.Human;
     }
 }
-

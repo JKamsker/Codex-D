@@ -127,7 +127,7 @@ public sealed class ServeCommand : AsyncCommand<ServeCommand.Settings>
             }
             else
             {
-                AnsiConsole.MarkupLine($"[red]Invalid --listen IP:[/] {settings.Listen}");
+                AnsiConsole.MarkupLine($"[red]Invalid --listen IP:[/] {Markup.Escape(settings.Listen)}");
             }
             return 2;
         }
@@ -215,7 +215,7 @@ public sealed class ServeCommand : AsyncCommand<ServeCommand.Settings>
             }
             else
             {
-                AnsiConsole.MarkupLine($"[red]Invalid --listen IP:[/] {settings.Listen}");
+                AnsiConsole.MarkupLine($"[red]Invalid --listen IP:[/] {Markup.Escape(settings.Listen)}");
             }
             return 2;
         }
@@ -265,8 +265,8 @@ public sealed class ServeCommand : AsyncCommand<ServeCommand.Settings>
             }
             else
             {
-                AnsiConsole.MarkupLine($"[grey]Daemon install dir:[/] {daemonBinDir}");
-                AnsiConsole.MarkupLine($"[grey]Daemon version:[/] desired={desiredVersion} installed={installedDisplay}");
+                AnsiConsole.MarkupLine($"[grey]Daemon install dir:[/] {Markup.Escape(daemonBinDir)}");
+                AnsiConsole.MarkupLine($"[grey]Daemon version:[/] desired={Markup.Escape(desiredVersion)} installed={Markup.Escape(installedDisplay)}");
             }
         }
 
@@ -304,8 +304,8 @@ public sealed class ServeCommand : AsyncCommand<ServeCommand.Settings>
                     else
                     {
                         AnsiConsole.Write(new Rule("[bold]codex-d http serve -d[/]").LeftJustified());
-                        AnsiConsole.MarkupLine($"Daemon URL: [cyan]{runtime.BaseUrl}[/]");
-                        AnsiConsole.MarkupLine($"StateDir: [grey]{stateDir}[/]");
+                        AnsiConsole.MarkupLine($"Daemon URL: [cyan]{Markup.Escape(runtime.BaseUrl)}[/]");
+                        AnsiConsole.MarkupLine($"StateDir: [grey]{Markup.Escape(stateDir)}[/]");
                         AnsiConsole.WriteLine();
                     }
                     return 0;
@@ -326,7 +326,7 @@ public sealed class ServeCommand : AsyncCommand<ServeCommand.Settings>
                     else
                     {
                         AnsiConsole.MarkupLine("[red]Daemon appears to be running but is unreachable.[/] Use [grey]--force[/] to stop and replace it.");
-                        AnsiConsole.MarkupLine($"StateDir: [grey]{stateDir}[/]");
+                        AnsiConsole.MarkupLine($"StateDir: [grey]{Markup.Escape(stateDir)}[/]");
                     }
                     return 1;
                 }
@@ -505,8 +505,8 @@ public sealed class ServeCommand : AsyncCommand<ServeCommand.Settings>
                     else
                     {
                         AnsiConsole.Write(new Rule("[bold]codex-d http serve -d[/]").LeftJustified());
-                        AnsiConsole.MarkupLine($"Daemon URL: [cyan]{rt.BaseUrl}[/]");
-                        AnsiConsole.MarkupLine($"StateDir: [grey]{stateDir}[/]");
+                        AnsiConsole.MarkupLine($"Daemon URL: [cyan]{Markup.Escape(rt.BaseUrl)}[/]");
+                        AnsiConsole.MarkupLine($"StateDir: [grey]{Markup.Escape(stateDir)}[/]");
                         AnsiConsole.WriteLine();
                         AnsiConsole.MarkupLine($"Try: [grey]codex-d http exec \"Hello\"[/]");
                         AnsiConsole.WriteLine();
@@ -528,7 +528,7 @@ public sealed class ServeCommand : AsyncCommand<ServeCommand.Settings>
         else
         {
             AnsiConsole.MarkupLine("[red]Failed to start daemon:[/] runtime file or health check did not become ready in time.");
-            AnsiConsole.MarkupLine($"Expected runtime file: [grey]{runtimePath}[/]");
+            AnsiConsole.MarkupLine($"Expected runtime file: [grey]{Markup.Escape(runtimePath)}[/]");
         }
         return 1;
     }
@@ -540,12 +540,28 @@ public sealed class ServeCommand : AsyncCommand<ServeCommand.Settings>
 
         if (!IPAddress.TryParse(settings.Listen, out var listen) || listen is null)
         {
+            if (json)
+            {
+                CliOutput.WriteJsonError("invalid_listen", $"Invalid --listen IP: {settings.Listen}");
+            }
+            else
+            {
+                AnsiConsole.MarkupLine($"[red]Invalid --listen IP:[/] {Markup.Escape(settings.Listen)}");
+            }
             return 2;
         }
 
         var port = settings.Port ?? TryGetEnvInt("CODEX_D_DAEMON_PORT") ?? StatePaths.DEFAULT_DAEMON_PORT;
         if (port is < 0 or > 65535)
         {
+            if (json)
+            {
+                CliOutput.WriteJsonError("invalid_port", $"Invalid --port: {port}");
+            }
+            else
+            {
+                AnsiConsole.MarkupLine($"[red]Invalid --port:[/] {port}");
+            }
             return 2;
         }
 
@@ -721,9 +737,9 @@ public sealed class ServeCommand : AsyncCommand<ServeCommand.Settings>
     private static void PrintBanner(ServerConfig config, bool isLoopback)
     {
         AnsiConsole.Write(new Rule("[bold]codex-d http serve[/]").LeftJustified());
-        AnsiConsole.MarkupLine($"Base URL: [cyan]{config.BaseUrl}[/]");
+        AnsiConsole.MarkupLine($"Base URL: [cyan]{Markup.Escape(config.BaseUrl)}[/]");
         AnsiConsole.MarkupLine($"RunnerId: [cyan]{config.Identity.RunnerId}[/]");
-        AnsiConsole.MarkupLine($"StateDir: [grey]{config.StateDirectory}[/]");
+        AnsiConsole.MarkupLine($"StateDir: [grey]{Markup.Escape(config.StateDirectory)}[/]");
 
         if (config.RequireAuth)
         {
@@ -734,7 +750,7 @@ public sealed class ServeCommand : AsyncCommand<ServeCommand.Settings>
             AnsiConsole.MarkupLine("Auth: [green]not required[/] on loopback (token still accepted)");
         }
 
-        AnsiConsole.MarkupLine($"Token: [yellow]{config.Identity.Token}[/]");
+        AnsiConsole.MarkupLine($"Token: [yellow]{Markup.Escape(config.Identity.Token)}[/]");
 
         if (!isLoopback)
         {
@@ -742,10 +758,10 @@ public sealed class ServeCommand : AsyncCommand<ServeCommand.Settings>
         }
 
         AnsiConsole.WriteLine();
-        AnsiConsole.MarkupLine($"Try: [grey]codex-d http exec --url {config.BaseUrl} --cd \"{Directory.GetCurrentDirectory()}\" \"Hello\"[/]");
+        AnsiConsole.MarkupLine($"Try: [grey]codex-d http exec --url {Markup.Escape(config.BaseUrl)} --cd \"{Markup.Escape(Directory.GetCurrentDirectory())}\" \"Hello\"[/]");
         if (config.RequireAuth)
         {
-            AnsiConsole.MarkupLine($"     [grey]... --token {config.Identity.Token}[/]");
+            AnsiConsole.MarkupLine($"     [grey]... --token {Markup.Escape(config.Identity.Token)}[/]");
         }
         AnsiConsole.WriteLine();
     }

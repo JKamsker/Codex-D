@@ -92,6 +92,11 @@ public sealed class CodexReviewRunExecutor : IRunExecutor
             await using var client = new JKToolKit.CodexSDK.Exec.CodexClient();
             var result = await client.ReviewAsync(options, stdoutWriter, stderrWriter, linked.Token);
 
+            if (!string.IsNullOrWhiteSpace(result.LogPath))
+            {
+                await context.SetCodexIdsAsync("review", null, result.LogPath, linked.Token);
+            }
+
             var status = result.ExitCode == 0 ? RunStatuses.Succeeded : RunStatuses.Failed;
             var error = result.ExitCode == 0 ? null : LimitError(result.StandardError);
 

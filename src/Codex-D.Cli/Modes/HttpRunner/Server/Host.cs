@@ -381,13 +381,13 @@ public static class Host
 
             tailEvents = Math.Min(tailEvents, 200000);
 
-            var queue = new Queue<object>(Math.Min(count, 50));
-            DateTimeOffset? maxNotificationAt = null;
-
             var dir = await store.TryResolveRunDirectoryAsync(runId, ct);
             var hasRawEvents = dir is not null && HasRawEventsFile(dir);
             if (hasRawEvents)
             {
+                var queue = new Queue<object>(Math.Min(count, 50));
+                DateTimeOffset? maxNotificationAt = null;
+
                 var events = await store.ReadRawEventsAsync(runId, tailEvents, ct);
                 foreach (var env in events)
                 {
@@ -410,41 +410,57 @@ public static class Host
 
                     queue.Enqueue(new { createdAt = env.CreatedAt, text });
                 }
-            }
-            else
-            {
-                var rolloutPath = CodexRolloutPathNormalizer.Normalize(record.CodexRolloutPath);
-                if (!string.IsNullOrWhiteSpace(rolloutPath) && File.Exists(rolloutPath))
-                {
-                    var items = await CodexRolloutMessagesReader.ReadAssistantMessagesAsync(rolloutPath, count, ct);
-                    foreach (var item in items)
-                    {
-                        if (queue.Count == count)
-                        {
-                            queue.Dequeue();
-                        }
 
-                        queue.Enqueue(new { createdAt = item.CreatedAt, text = item.Text });
+                var snapshot = backlog.SnapshotAfter(runId, maxNotificationAt);
+                if (snapshot.Count > tailEvents)
+                {
+                    snapshot = snapshot.Skip(snapshot.Count - tailEvents).ToArray();
+                }
+
+                foreach (var env in snapshot)
+                {
+                    if (!string.Equals(env.Type, "codex.notification", StringComparison.Ordinal))
+                    {
+                        continue;
                     }
+
+                    if (!RunEventDataExtractors.TryGetCompletedAgentMessageText(env.Data, out var text) ||
+                        string.IsNullOrWhiteSpace(text))
+                    {
+                        continue;
+                    }
+
+                    if (queue.Count == count)
+                    {
+                        queue.Dequeue();
+                    }
+
+                    queue.Enqueue(new { createdAt = env.CreatedAt, text });
+                }
+
+                return Results.Ok(new { items = queue.ToArray() });
+            }
+
+            var history = new List<(DateTimeOffset CreatedAt, string Text)>(count);
+
+            var rolloutPath = CodexRolloutPathNormalizer.Normalize(record.CodexRolloutPath);
+            if (!string.IsNullOrWhiteSpace(rolloutPath) && File.Exists(rolloutPath))
+            {
+                var items = await CodexRolloutMessagesReader.ReadAssistantMessagesAsync(rolloutPath, count, ct);
+                foreach (var item in items)
+                {
+                    history.Add((item.CreatedAt, item.Text));
                 }
             }
 
-            IReadOnlyList<RunEventEnvelope> snapshot;
-            if (hasRawEvents)
+            var snapshotPending = backlog.SnapshotPending(runId);
+            if (snapshotPending.Count > tailEvents)
             {
-                snapshot = backlog.SnapshotAfter(runId, maxNotificationAt);
-            }
-            else
-            {
-                snapshot = backlog.SnapshotPending(runId);
+                snapshotPending = snapshotPending.Skip(snapshotPending.Count - tailEvents).ToArray();
             }
 
-            if (snapshot.Count > tailEvents)
-            {
-                snapshot = snapshot.Skip(snapshot.Count - tailEvents).ToArray();
-            }
-
-            foreach (var env in snapshot)
+            var pending = new List<(DateTimeOffset CreatedAt, string Text)>();
+            foreach (var env in snapshotPending)
             {
                 if (!string.Equals(env.Type, "codex.notification", StringComparison.Ordinal))
                 {
@@ -457,15 +473,24 @@ public static class Host
                     continue;
                 }
 
-                if (queue.Count == count)
-                {
-                    queue.Dequeue();
-                }
-
-                queue.Enqueue(new { createdAt = env.CreatedAt, text });
+                pending.Add((env.CreatedAt, text));
             }
 
-            return Results.Ok(new { items = queue.ToArray() });
+            var overlap = FindMessageOverlap(history, pending);
+
+            var combined = new List<(DateTimeOffset CreatedAt, string Text)>(history.Count + pending.Count - overlap);
+            combined.AddRange(history);
+            for (var i = overlap; i < pending.Count; i++)
+            {
+                combined.Add(pending[i]);
+            }
+
+            if (combined.Count > count)
+            {
+                combined = combined.Skip(combined.Count - count).ToList();
+            }
+
+            return Results.Ok(new { items = combined.Select(x => new { createdAt = x.CreatedAt, text = x.Text }).ToArray() });
         });
 
         app.MapGet("/v1/runs/{runId:guid}/thinking-summaries", async (Guid runId, HttpRequest req, RunStore store, RunNotificationBacklog backlog, CancellationToken ct) =>
@@ -790,6 +815,38 @@ public static class Host
         });
 
         return app;
+    }
+
+    private static int FindMessageOverlap(
+        IReadOnlyList<(DateTimeOffset CreatedAt, string Text)> history,
+        IReadOnlyList<(DateTimeOffset CreatedAt, string Text)> pending)
+    {
+        if (history.Count == 0 || pending.Count == 0)
+        {
+            return 0;
+        }
+
+        var maxOverlap = Math.Min(history.Count, pending.Count);
+        for (var overlap = maxOverlap; overlap >= 1; overlap--)
+        {
+            var historyStart = history.Count - overlap;
+            var match = true;
+            for (var i = 0; i < overlap; i++)
+            {
+                if (!string.Equals(history[historyStart + i].Text, pending[i].Text, StringComparison.Ordinal))
+                {
+                    match = false;
+                    break;
+                }
+            }
+
+            if (match)
+            {
+                return overlap;
+            }
+        }
+
+        return 0;
     }
 
     private static bool HasRawEventsFile(string runDirectory) =>

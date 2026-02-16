@@ -32,7 +32,7 @@ public sealed class RunThinkingCommand : AsyncCommand<RunThinkingCommand.Setting
         }
         catch (ArgumentException ex)
         {
-            if (settings.Json)
+            if (settings.Json || !string.IsNullOrWhiteSpace(settings.OutputFormat))
             {
                 CliOutput.WriteJsonError("invalid_outputformat", ex.Message);
                 return 2;

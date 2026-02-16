@@ -826,6 +826,53 @@ public sealed class RunnerHttpServerTests
     }
 
     [Fact]
+    public async Task RunMessages_DedupesOverlappingMaterializedBacklog()
+    {
+        await using var host = await RunnerHttpTestHost.StartAsync(requireAuth: false, new RolloutOnlyMessagesExecutor(), persistRawEvents: false);
+        using var sdk = host.CreateSdkClient(includeToken: false);
+        using var http = host.CreateHttpClient(includeToken: false);
+
+        var cwd = Path.Combine(host.StateDir, "repo");
+        Directory.CreateDirectory(cwd);
+
+        var created = await sdk.CreateRunAsync(new CreateRunRequest { Cwd = cwd, Prompt = "hi", Model = null, Sandbox = null, ApprovalPolicy = "never" }, CancellationToken.None);
+        var runId = created.RunId;
+        await WaitForTerminalAsync(sdk, runId, TimeSpan.FromSeconds(2));
+
+        var backlog = host.App.Services.GetRequiredService<RunNotificationBacklog>();
+
+        var now = DateTimeOffset.UtcNow;
+        backlog.Add(runId, new RunEventEnvelope
+        {
+            Type = "codex.notification",
+            CreatedAt = now,
+            Data = JsonSerializer.SerializeToElement(new
+            {
+                method = "item/completed",
+                @params = new { item = new { type = "agentMessage", text = "two" } }
+            })
+        });
+
+        backlog.Add(runId, new RunEventEnvelope
+        {
+            Type = "codex.notification",
+            CreatedAt = now.AddMilliseconds(1),
+            Data = JsonSerializer.SerializeToElement(new
+            {
+                method = "item/completed",
+                @params = new { item = new { type = "agentMessage", text = "three" } }
+            })
+        });
+
+        var json = await http.GetFromJsonAsync<JsonElement>($"/v1/runs/{runId:D}/messages?count=3");
+        var items = json.GetProperty("items").EnumerateArray().ToList();
+        Assert.Equal(3, items.Count);
+        Assert.Equal("one", items[0].GetProperty("text").GetString());
+        Assert.Equal("two", items[1].GetProperty("text").GetString());
+        Assert.Equal("three", items[2].GetProperty("text").GetString());
+    }
+
+    [Fact]
     public async Task ThinkingSummaries_CombinesRolloutAndPendingBacklog()
     {
         await using var host = await RunnerHttpTestHost.StartAsync(requireAuth: false, new PartialRolloutMaterializationExecutor(), persistRawEvents: false);

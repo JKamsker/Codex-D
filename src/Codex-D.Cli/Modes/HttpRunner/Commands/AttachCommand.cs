@@ -39,7 +39,7 @@ public sealed class AttachCommand : AsyncCommand<AttachCommand.Settings>
         }
         catch (ArgumentException ex)
         {
-            if (settings.Json)
+            if (settings.Json || !string.IsNullOrWhiteSpace(settings.OutputFormat))
             {
                 CliOutput.WriteJsonError("invalid_outputformat", ex.Message);
                 return 2;

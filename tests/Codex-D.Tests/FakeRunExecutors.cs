@@ -178,6 +178,23 @@ internal sealed class PartialRolloutMaterializationExecutor : IRunExecutor
     }
 }
 
+internal sealed class RolloutOnlyMessagesExecutor : IRunExecutor
+{
+    public async Task<RunExecutionResult> ExecuteAsync(RunExecutionContext context, CancellationToken ct)
+    {
+        context.SetInterrupt(_ => Task.CompletedTask);
+
+        var rolloutPath = TestCodexRollout.EnsureInitialized(context.Cwd);
+        await context.SetCodexIdsAsync("thread-test", "turn-test", rolloutPath, ct);
+
+        TestCodexRollout.AppendAgentMessage(rolloutPath, "one");
+        TestCodexRollout.AppendAgentMessage(rolloutPath, "two");
+        TestCodexRollout.AppendAgentMessage(rolloutPath, "three");
+
+        return new RunExecutionResult { Status = RunStatuses.Succeeded, Error = null };
+    }
+}
+
 internal sealed class PartialLineExecutor : IRunExecutor
 {
     public async Task<RunExecutionResult> ExecuteAsync(RunExecutionContext context, CancellationToken ct)

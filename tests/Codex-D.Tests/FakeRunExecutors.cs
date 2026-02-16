@@ -103,6 +103,98 @@ internal sealed class MessagesAndThinkingExecutor : IRunExecutor
     }
 }
 
+internal sealed class MessagesAndThinkingNoRolloutExecutor : IRunExecutor
+{
+    public async Task<RunExecutionResult> ExecuteAsync(RunExecutionContext context, CancellationToken ct)
+    {
+        context.SetInterrupt(_ => Task.CompletedTask);
+
+        await context.PublishNotificationAsync(
+            "item/commandExecution/outputDelta",
+            JsonSerializer.SerializeToElement(new { delta = "thinking" }),
+            ct);
+
+        await context.PublishNotificationAsync(
+            "item/commandExecution/outputDelta",
+            JsonSerializer.SerializeToElement(new { delta = "**Phase 1**\nnot a heading\n**Phase 2**\n" }),
+            ct);
+
+        await context.PublishNotificationAsync(
+            "item/commandExecution/outputDelta",
+            JsonSerializer.SerializeToElement(new { delta = "final" }),
+            ct);
+
+        await context.PublishNotificationAsync(
+            "item/commandExecution/outputDelta",
+            JsonSerializer.SerializeToElement(new { delta = "**ignored**" }),
+            ct);
+
+        await context.PublishNotificationAsync(
+            "item/completed",
+            JsonSerializer.SerializeToElement(new { item = new { type = "agentMessage", text = "one" } }),
+            ct);
+
+        await context.PublishNotificationAsync(
+            "item/completed",
+            JsonSerializer.SerializeToElement(new { item = new { type = "agentMessage", text = "two" } }),
+            ct);
+
+        await context.PublishNotificationAsync(
+            "item/completed",
+            JsonSerializer.SerializeToElement(new { item = new { type = "agentMessage", text = "three" } }),
+            ct);
+
+        return new RunExecutionResult { Status = RunStatuses.Succeeded, Error = null };
+    }
+}
+
+internal sealed class PartialRolloutMaterializationExecutor : IRunExecutor
+{
+    public async Task<RunExecutionResult> ExecuteAsync(RunExecutionContext context, CancellationToken ct)
+    {
+        context.SetInterrupt(_ => Task.CompletedTask);
+
+        var rolloutPath = TestCodexRollout.EnsureInitialized(context.Cwd);
+        await context.SetCodexIdsAsync("thread-test", "turn-test", rolloutPath, ct);
+
+        // Persist some history into the rollout file.
+        TestCodexRollout.AppendExecCommandOutputDelta(rolloutPath, "thinking");
+        TestCodexRollout.AppendExecCommandOutputDelta(rolloutPath, "**Phase 1**\n");
+        TestCodexRollout.AppendAgentMessage(rolloutPath, "one");
+        TestCodexRollout.AppendAgentMessage(rolloutPath, "two");
+
+        // Publish newer data only via notifications (simulates not-yet-materialized rollout tail).
+        await context.PublishNotificationAsync(
+            "item/commandExecution/outputDelta",
+            JsonSerializer.SerializeToElement(new { delta = "**Phase 2**\n" }),
+            ct);
+
+        await context.PublishNotificationAsync(
+            "item/completed",
+            JsonSerializer.SerializeToElement(new { item = new { type = "agentMessage", text = "three" } }),
+            ct);
+
+        return new RunExecutionResult { Status = RunStatuses.Succeeded, Error = null };
+    }
+}
+
+internal sealed class RolloutOnlyMessagesExecutor : IRunExecutor
+{
+    public async Task<RunExecutionResult> ExecuteAsync(RunExecutionContext context, CancellationToken ct)
+    {
+        context.SetInterrupt(_ => Task.CompletedTask);
+
+        var rolloutPath = TestCodexRollout.EnsureInitialized(context.Cwd);
+        await context.SetCodexIdsAsync("thread-test", "turn-test", rolloutPath, ct);
+
+        TestCodexRollout.AppendAgentMessage(rolloutPath, "one");
+        TestCodexRollout.AppendAgentMessage(rolloutPath, "two");
+        TestCodexRollout.AppendAgentMessage(rolloutPath, "three");
+
+        return new RunExecutionResult { Status = RunStatuses.Succeeded, Error = null };
+    }
+}
+
 internal sealed class PartialLineExecutor : IRunExecutor
 {
     public async Task<RunExecutionResult> ExecuteAsync(RunExecutionContext context, CancellationToken ct)

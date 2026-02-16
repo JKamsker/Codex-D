@@ -3,7 +3,9 @@ using System.Text.Json;
 using CodexD.HttpRunner.Client;
 using CodexD.HttpRunner.Daemon;
 using CodexD.HttpRunner.State;
+using CodexD.Shared.Output;
 using CodexD.Shared.Paths;
+using CodexD.Shared.Strings;
 using Spectre.Console;
 using Spectre.Console.Cli;
 
@@ -20,20 +22,37 @@ public sealed class StatusCommand : AsyncCommand<StatusCommand.Settings>
 
     public override async Task<int> ExecuteAsync(CommandContext context, Settings settings, CancellationToken cancellationToken)
     {
+        OutputFormat format;
+        try
+        {
+            format = settings.ResolveOutputFormat(OutputFormatUsage.Single);
+        }
+        catch (ArgumentException ex)
+        {
+            if (settings.Json || !string.IsNullOrWhiteSpace(settings.OutputFormat))
+            {
+                CliOutput.WriteJsonError("invalid_outputformat", ex.Message);
+                return 2;
+            }
+
+            Console.Error.WriteLine(ex.Message);
+            return 2;
+        }
+
         var isDev = BuildMode.IsDev();
 
         var cwd = string.IsNullOrWhiteSpace(settings.Cd) ? Directory.GetCurrentDirectory() : settings.Cd!;
         cwd = PathPolicy.TrimTrailingSeparators(Path.GetFullPath(cwd));
 
         var explicitUrl =
-            TrimOrNull(settings.Url) ??
-            TrimOrNull(Environment.GetEnvironmentVariable("CODEX_D_URL")) ??
-            TrimOrNull(Environment.GetEnvironmentVariable("CODEX_RUNNER_URL"));
+            StringHelpers.TrimOrNull(settings.Url) ??
+            StringHelpers.TrimOrNull(Environment.GetEnvironmentVariable("CODEX_D_URL")) ??
+            StringHelpers.TrimOrNull(Environment.GetEnvironmentVariable("CODEX_RUNNER_URL"));
 
         var explicitToken =
-            TrimOrNull(settings.Token) ??
-            TrimOrNull(Environment.GetEnvironmentVariable("CODEX_D_TOKEN")) ??
-            TrimOrNull(Environment.GetEnvironmentVariable("CODEX_RUNNER_TOKEN"));
+            StringHelpers.TrimOrNull(settings.Token) ??
+            StringHelpers.TrimOrNull(Environment.GetEnvironmentVariable("CODEX_D_TOKEN")) ??
+            StringHelpers.TrimOrNull(Environment.GetEnvironmentVariable("CODEX_RUNNER_TOKEN"));
 
         var probes = new List<object>();
 
@@ -42,7 +61,7 @@ public sealed class StatusCommand : AsyncCommand<StatusCommand.Settings>
             var health = await RunnerHealth.CheckAsync(explicitUrl, explicitToken, cancellationToken);
             probes.Add(new { kind = "explicit", baseUrl = explicitUrl, health = health.ToString().ToLowerInvariant() });
 
-            if (settings.Json)
+            if (format != OutputFormat.Human)
             {
                 await WriteStatusJsonAsync(explicitUrl, explicitToken, probes, cancellationToken);
                 return health == RunnerHealthStatus.Ok ? 0 : 1;
@@ -60,7 +79,7 @@ public sealed class StatusCommand : AsyncCommand<StatusCommand.Settings>
 
         // Daemon probe
         var daemonStateDir =
-            TrimOrNull(Environment.GetEnvironmentVariable("CODEX_D_DAEMON_STATE_DIR")) ??
+            StringHelpers.TrimOrNull(Environment.GetEnvironmentVariable("CODEX_D_DAEMON_STATE_DIR")) ??
             StatePaths.GetDefaultDaemonStateDir(isDev);
 
         var daemonRuntimePath = Path.Combine(daemonStateDir, "daemon.runtime.json");
@@ -120,7 +139,7 @@ public sealed class StatusCommand : AsyncCommand<StatusCommand.Settings>
         var resolvedToken = daemonAttempt == "ok" ? daemonToken : fgAttempt == "ok" ? fgToken : null;
         var resolvedSource = daemonAttempt == "ok" ? "daemon" : fgAttempt == "ok" ? "foreground" : null;
 
-        if (settings.Json)
+        if (format != OutputFormat.Human)
         {
             var payload = new
             {
@@ -129,7 +148,7 @@ public sealed class StatusCommand : AsyncCommand<StatusCommand.Settings>
                 probes
             };
 
-            Console.Out.WriteLine(JsonSerializer.Serialize(payload, new JsonSerializerOptions(JsonSerializerDefaults.Web)));
+            CliOutput.WriteJsonLine(payload);
             return resolvedBaseUrl is null ? 1 : 0;
         }
 
@@ -153,11 +172,11 @@ public sealed class StatusCommand : AsyncCommand<StatusCommand.Settings>
         {
             var health = await client.GetHealthAsync(ct);
             var info = await client.GetInfoAsync(ct);
-            Console.Out.WriteLine(JsonSerializer.Serialize(new { payload.resolved, payload.probes, health, info }, new JsonSerializerOptions(JsonSerializerDefaults.Web)));
+            CliOutput.WriteJsonLine(new { payload.resolved, payload.probes, health, info });
         }
         catch
         {
-            Console.Out.WriteLine(JsonSerializer.Serialize(payload, new JsonSerializerOptions(JsonSerializerDefaults.Web)));
+            CliOutput.WriteJsonLine(payload);
         }
     }
 
@@ -240,12 +259,9 @@ public sealed class StatusCommand : AsyncCommand<StatusCommand.Settings>
         AnsiConsole.WriteLine();
     }
 
-    private static string? TrimOrNull(string? value) =>
-        string.IsNullOrWhiteSpace(value) ? null : value.Trim();
-
     private static int? TryGetEnvInt(string name)
     {
-        var raw = TrimOrNull(Environment.GetEnvironmentVariable(name));
+        var raw = StringHelpers.TrimOrNull(Environment.GetEnvironmentVariable(name));
         return int.TryParse(raw, out var i) ? i : null;
     }
 }

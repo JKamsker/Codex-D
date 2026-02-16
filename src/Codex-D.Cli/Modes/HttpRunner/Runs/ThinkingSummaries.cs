@@ -8,39 +8,51 @@ namespace CodexD.HttpRunner.Runs;
 internal static class ThinkingSummaries
 {
     public static IReadOnlyList<string> FromRawEvents(IReadOnlyList<RunEventEnvelope> events)
-    {
-        var summaries = new List<string>();
-        var last = string.Empty;
-        var inThinking = false;
-
-        foreach (var env in events)
-        {
-            if (!string.Equals(env.Type, "codex.notification", StringComparison.Ordinal))
-            {
-                continue;
-            }
-
-            if (!RunEventDataExtractors.TryGetOutputDelta(env.Data, out var delta) ||
-                string.IsNullOrWhiteSpace(delta))
-            {
-                continue;
-            }
-
-            AddSummariesFromDelta(delta, summaries, ref last, ref inThinking);
-        }
-
-        return summaries;
-    }
+        => BuildSummaries(rolloutPath: null, events, CancellationToken.None);
 
     public static IReadOnlyList<string> FromCodexRollout(string rolloutPath, int? _tailEvents, CancellationToken ct)
+        => BuildSummaries(rolloutPath, events: null, ct);
+
+    public static IReadOnlyList<string> FromCodexRolloutThenRawEvents(
+        string rolloutPath,
+        IReadOnlyList<RunEventEnvelope> extraEvents,
+        CancellationToken ct)
+        => BuildSummaries(rolloutPath, extraEvents, ct);
+
+    private static IReadOnlyList<string> BuildSummaries(
+        string? rolloutPath,
+        IReadOnlyList<RunEventEnvelope>? events,
+        CancellationToken ct)
     {
         var summaries = new List<string>();
         var last = string.Empty;
         var inThinking = false;
 
-        foreach (var delta in ReadOutputDeltasFromCodexRollout(rolloutPath, ct))
+        if (!string.IsNullOrWhiteSpace(rolloutPath))
         {
-            AddSummariesFromDelta(delta, summaries, ref last, ref inThinking);
+            foreach (var delta in ReadOutputDeltasFromCodexRollout(rolloutPath, ct))
+            {
+                AddSummariesFromDelta(delta, summaries, ref last, ref inThinking);
+            }
+        }
+
+        if (events is not null)
+        {
+            foreach (var env in events)
+            {
+                if (!string.Equals(env.Type, "codex.notification", StringComparison.Ordinal))
+                {
+                    continue;
+                }
+
+                if (!RunEventDataExtractors.TryGetOutputDelta(env.Data, out var delta) ||
+                    string.IsNullOrWhiteSpace(delta))
+                {
+                    continue;
+                }
+
+                AddSummariesFromDelta(delta, summaries, ref last, ref inThinking);
+            }
         }
 
         return summaries;

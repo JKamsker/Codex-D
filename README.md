@@ -80,12 +80,24 @@ To force dev-mode defaults in a Release build, set `CODEX_D_DEV_MODE=1`.
 codex-d http exec "Hello"
 ```
 
+Set reasoning effort (applies to this turn and subsequent turns in the run):
+
+```bash
+codex-d http exec --effort high "Be thorough"
+```
+
 ### Run a code review (non-interactive)
 
 Review uncommitted changes in the current repo:
 
 ```bash
 codex-d http review --uncommitted
+```
+
+Set reasoning effort for the review (exec mode):
+
+```bash
+codex-d http review --effort high --uncommitted
 ```
 
 Review a specific commit:
@@ -130,6 +142,12 @@ Resume a paused exec run (default prompt: "continue"):
 
 ```bash
 codex-d http run resume <RUN_ID>
+```
+
+Override reasoning effort on resume:
+
+```bash
+codex-d http run resume --effort low <RUN_ID>
 ```
 
 Inspect a run’s output artifacts:

@@ -2,6 +2,7 @@ using System.ComponentModel;
 using System.Text.Json;
 using CodexD.HttpRunner.Client;
 using CodexD.HttpRunner.Contracts;
+using CodexD.Shared.Output;
 using Spectre.Console;
 using Spectre.Console.Cli;
 
@@ -25,6 +26,10 @@ public sealed class ExecCommand : AsyncCommand<ExecCommand.Settings>
         [CommandOption("--model <MODEL>")]
         public string? Model { get; init; }
 
+        [CommandOption("--effort|--reasoning-effort <EFFORT>")]
+        [Description("Reasoning effort override (e.g. none, minimal, low, medium, high, xhigh).")]
+        public string? Effort { get; init; }
+
         [CommandOption("--sandbox <MODE>")]
         public string? Sandbox { get; init; }
 
@@ -35,6 +40,23 @@ public sealed class ExecCommand : AsyncCommand<ExecCommand.Settings>
 
     public override async Task<int> ExecuteAsync(CommandContext context, Settings settings, CancellationToken cancellationToken)
     {
+        OutputFormat format;
+        try
+        {
+            format = settings.ResolveOutputFormat(OutputFormatUsage.Streaming);
+        }
+        catch (ArgumentException ex)
+        {
+            if (settings.Json || !string.IsNullOrWhiteSpace(settings.OutputFormat))
+            {
+                CliOutput.WriteJsonError("invalid_outputformat", ex.Message);
+                return 2;
+            }
+
+            Console.Error.WriteLine(ex.Message);
+            return 2;
+        }
+
         ResolvedClientSettings resolved;
         try
         {
@@ -42,7 +64,14 @@ public sealed class ExecCommand : AsyncCommand<ExecCommand.Settings>
         }
         catch (RunnerResolutionFailure ex)
         {
-            Console.Error.WriteLine(ex.UserMessage);
+            if (format != OutputFormat.Human)
+            {
+                CliOutput.WriteJsonError("runner_not_found", ex.UserMessage);
+            }
+            else
+            {
+                Console.Error.WriteLine(ex.UserMessage);
+            }
             return 1;
         }
 
@@ -58,9 +87,9 @@ public sealed class ExecCommand : AsyncCommand<ExecCommand.Settings>
             var runId = created.RunId;
             var status = created.Status;
 
-            if (settings.Json)
+            if (format != OutputFormat.Human)
             {
-                WriteJsonLine(new { eventName = "run.created", runId, status });
+                CliOutput.WriteJsonLine(new { eventName = "run.created", runId, status });
             }
             else
             {
@@ -72,12 +101,18 @@ public sealed class ExecCommand : AsyncCommand<ExecCommand.Settings>
                 return 0;
             }
 
-            return await StreamAsync(client, runId, replay: true, follow: true, tail: null, json: settings.Json, cancellationToken);
+            return await StreamAsync(client, runId, replay: true, follow: true, tail: null, format, cancellationToken);
         }
         catch (ArgumentException ex)
         {
+            if (format != OutputFormat.Human)
+            {
+                CliOutput.WriteJsonError("invalid_request", ex.Message);
+                return 2;
+            }
+
             Console.Error.WriteLine(ex.Message);
-            return 1;
+            return 2;
         }
     }
 
@@ -87,6 +122,7 @@ public sealed class ExecCommand : AsyncCommand<ExecCommand.Settings>
             Cwd = cwd,
             Prompt = prompt,
             Model = string.IsNullOrWhiteSpace(settings.Model) ? null : settings.Model.Trim(),
+            Effort = string.IsNullOrWhiteSpace(settings.Effort) ? null : settings.Effort.Trim(),
             Sandbox = string.IsNullOrWhiteSpace(settings.Sandbox) ? null : settings.Sandbox.Trim(),
             ApprovalPolicy = string.IsNullOrWhiteSpace(settings.ApprovalPolicy) ? "never" : settings.ApprovalPolicy.Trim()
         };
@@ -112,27 +148,74 @@ public sealed class ExecCommand : AsyncCommand<ExecCommand.Settings>
         return prompt;
     }
 
-    private static string? TrimOrNull(string? value) =>
-        string.IsNullOrWhiteSpace(value) ? null : value.Trim();
-
     internal static async Task<int> StreamAsync(
         RunnerClient client,
         Guid runId,
         bool replay,
         bool follow,
         int? tail,
-        bool json,
+        OutputFormat format,
         CancellationToken cancellationToken)
     {
+        var json = format != OutputFormat.Human;
         var sawCompletion = false;
         var exitCode = 0;
 
         await foreach (var evt in client.GetEventsAsync(runId, replay, follow, tail, cancellationToken))
         {
+            if (evt.Name == "run.completed")
+            {
+                sawCompletion = true;
+                if (TryExtractStatus(evt.Data, out var status))
+                {
+                    exitCode = status is RunStatuses.Succeeded ? 0 : 1;
+                }
+                else
+                {
+                    exitCode = 1;
+                }
+
+                if (json)
+                {
+                    using var doc = JsonDocument.Parse(evt.Data);
+                    CliOutput.WriteJsonLine(new { eventName = evt.Name, data = doc.RootElement.Clone() });
+                    continue;
+                }
+
+                if (TryExtractStatus(evt.Data, out status))
+                {
+                    Console.Out.WriteLine();
+                    AnsiConsole.MarkupLine($"[grey]Completed:[/] {status}");
+                }
+
+                continue;
+            }
+
+            if (evt.Name == "run.paused")
+            {
+                sawCompletion = true;
+                exitCode = 0;
+
+                if (json)
+                {
+                    using var doc = JsonDocument.Parse(evt.Data);
+                    CliOutput.WriteJsonLine(new { eventName = evt.Name, data = doc.RootElement.Clone() });
+                    continue;
+                }
+
+                if (TryExtractStatus(evt.Data, out var status))
+                {
+                    Console.Out.WriteLine();
+                    AnsiConsole.MarkupLine($"[grey]Paused:[/] {status}");
+                }
+
+                continue;
+            }
+
             if (json)
             {
                 using var doc = JsonDocument.Parse(evt.Data);
-                WriteJsonLine(new { eventName = evt.Name, data = doc.RootElement.Clone() });
+                CliOutput.WriteJsonLine(new { eventName = evt.Name, data = doc.RootElement.Clone() });
                 continue;
             }
 
@@ -174,51 +257,22 @@ public sealed class ExecCommand : AsyncCommand<ExecCommand.Settings>
                 continue;
             }
 
-            if (evt.Name == "run.completed")
-            {
-                sawCompletion = true;
-                if (TryExtractStatus(evt.Data, out var status))
-                {
-                    Console.Out.WriteLine();
-                    AnsiConsole.MarkupLine($"[grey]Completed:[/] {status}");
-                    exitCode = status is RunStatuses.Succeeded ? 0 : 1;
-                }
-                else
-                {
-                    exitCode = 1;
-                }
-
-                continue;
-            }
-
-            if (evt.Name == "run.paused")
-            {
-                sawCompletion = true;
-                if (TryExtractStatus(evt.Data, out var status))
-                {
-                    Console.Out.WriteLine();
-                    AnsiConsole.MarkupLine($"[grey]Paused:[/] {status}");
-                    exitCode = 0;
-                }
-                else
-                {
-                    exitCode = 0;
-                }
-
-                continue;
-            }
         }
 
-        if (!json)
+        if (format == OutputFormat.Human)
         {
             Console.Out.Flush();
         }
 
         if (follow && !sawCompletion && !cancellationToken.IsCancellationRequested)
         {
-            if (!json)
+            if (format == OutputFormat.Human)
             {
                 Console.Error.WriteLine("Event stream ended before run.completed was received.");
+            }
+            else
+            {
+                CliOutput.WriteJsonError("stream_ended", "Event stream ended before run.completed was received.");
             }
             return 1;
         }
@@ -351,9 +405,4 @@ public sealed class ExecCommand : AsyncCommand<ExecCommand.Settings>
         }
     }
 
-    private static void WriteJsonLine(object value)
-    {
-        var json = JsonSerializer.Serialize(value, new JsonSerializerOptions(JsonSerializerDefaults.Web));
-        Console.Out.WriteLine(json);
-    }
 }

@@ -28,6 +28,7 @@ public sealed class CodexAppServerRunExecutor : IRunExecutor
         var model = ResolveModelOrDefault(context.Model);
         var sandbox = ResolveSandboxOrDefault(context.Sandbox);
         var approvalPolicy = ResolveApprovalPolicyOrDefault(context.ApprovalPolicy);
+        var effort = ResolveEffortOrNull(context.Effort);
 
         CodexThread thread;
         if (!string.IsNullOrWhiteSpace(context.CodexThreadId))
@@ -67,6 +68,7 @@ public sealed class CodexAppServerRunExecutor : IRunExecutor
                 Input = [TurnInputItem.Text(context.Prompt)],
                 Cwd = context.Cwd,
                 Model = model,
+                Effort = effort,
                 ApprovalPolicy = approvalPolicy,
                 SandboxPolicy = null
             },
@@ -120,6 +122,17 @@ public sealed class CodexAppServerRunExecutor : IRunExecutor
         }
 
         return CodexApprovalPolicy.Never;
+    }
+
+    private static CodexReasoningEffort? ResolveEffortOrNull(string? raw)
+    {
+        raw = raw?.Trim();
+        if (string.IsNullOrWhiteSpace(raw))
+        {
+            return null;
+        }
+
+        return CodexReasoningEffort.TryParse(raw, out var effort) ? effort : (CodexReasoningEffort?)null;
     }
 
     private RunExecutionResult MapCompletion(TurnCompletedNotification completed)

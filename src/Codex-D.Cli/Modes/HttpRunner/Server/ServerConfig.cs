@@ -14,4 +14,5 @@ public sealed record class ServerConfig
     public required DateTimeOffset StartedAtUtc { get; init; }
 
     public bool PersistRawEvents { get; init; }
+    public bool JsonLogs { get; init; }
 }

@@ -33,11 +33,18 @@ public static class Host
         });
 
         builder.Logging.ClearProviders();
-        builder.Logging.AddSimpleConsole(x =>
+        if (config.JsonLogs)
         {
-            x.SingleLine = true;
-            x.TimestampFormat = "HH:mm:ss ";
-        });
+            builder.Logging.AddJsonConsole();
+        }
+        else
+        {
+            builder.Logging.AddSimpleConsole(x =>
+            {
+                x.SingleLine = true;
+                x.TimestampFormat = "HH:mm:ss ";
+            });
+        }
 
         builder.Services.Configure<JsonOptions>(o =>
         {
@@ -296,7 +303,7 @@ public static class Host
         {
             var prompt = string.IsNullOrWhiteSpace(request?.Prompt) ? "continue" : request!.Prompt!.Trim();
 
-            var resumed = await runs.ResumeAsync(runId, prompt, ct);
+            var resumed = await runs.ResumeAsync(runId, prompt, request?.Effort, ct);
             return resumed is null
                 ? Results.NotFound(new { error = "not_found_or_not_resumable" })
                 : Results.Ok(new { runId = resumed.RunId, status = resumed.Status });
@@ -350,7 +357,7 @@ public static class Host
             });
         }
 
-        app.MapGet("/v1/runs/{runId:guid}/messages", async (Guid runId, HttpRequest req, RunStore store, CancellationToken ct) =>
+        app.MapGet("/v1/runs/{runId:guid}/messages", async (Guid runId, HttpRequest req, RunStore store, RunNotificationBacklog backlog, CancellationToken ct) =>
         {
             var record = await store.TryGetAsync(runId, ct);
             if (record is null)
@@ -374,55 +381,77 @@ public static class Host
 
             tailEvents = Math.Min(tailEvents, 200000);
 
-            var queue = new Queue<object>(Math.Min(count, 50));
-
             var dir = await store.TryResolveRunDirectoryAsync(runId, ct);
-            if (dir is not null && HasRawEventsFile(dir))
+            var hasRawEvents = dir is not null && HasRawEventsFile(dir);
+            if (hasRawEvents)
             {
+                var queue = new Queue<object>(Math.Min(count, 50));
                 var events = await store.ReadRawEventsAsync(runId, tailEvents, ct);
-                foreach (var env in events)
+                var maxNotificationAt = events.Where(e => string.Equals(e.Type, "codex.notification", StringComparison.Ordinal))
+                    .Select(e => (DateTimeOffset?)e.CreatedAt)
+                    .Max();
+
+                foreach (var (createdAt, text) in ExtractCompletedMessages(events))
                 {
-                    if (!string.Equals(env.Type, "codex.notification", StringComparison.Ordinal))
-                    {
-                        continue;
-                    }
-
-                    if (!RunEventDataExtractors.TryGetCompletedAgentMessageText(env.Data, out var text) ||
-                        string.IsNullOrWhiteSpace(text))
-                    {
-                        continue;
-                    }
-
-                    if (queue.Count == count)
-                    {
-                        queue.Dequeue();
-                    }
-
-                    queue.Enqueue(new { createdAt = env.CreatedAt, text });
+                    EnqueueCompletedMessage(queue, count, createdAt, text);
                 }
+
+                var snapshot = backlog.SnapshotAfter(runId, maxNotificationAt);
+                if (snapshot.Count > tailEvents)
+                {
+                    snapshot = snapshot.Skip(snapshot.Count - tailEvents).ToArray();
+                }
+
+                foreach (var (createdAt, text) in ExtractCompletedMessages(snapshot))
+                {
+                    EnqueueCompletedMessage(queue, count, createdAt, text);
+                }
+
+                return Results.Ok(new { items = queue.ToArray() });
             }
-            else
+
+            var history = new List<(DateTimeOffset CreatedAt, string Text)>(count);
+
+            var rolloutPath = CodexRolloutPathNormalizer.Normalize(record.CodexRolloutPath);
+            if (!string.IsNullOrWhiteSpace(rolloutPath) && File.Exists(rolloutPath))
             {
-                var rolloutPath = CodexRolloutPathNormalizer.Normalize(record.CodexRolloutPath);
-                if (!string.IsNullOrWhiteSpace(rolloutPath) && File.Exists(rolloutPath))
+                var items = await CodexRolloutMessagesReader.ReadAssistantMessagesAsync(rolloutPath, count, ct);
+                foreach (var item in items)
                 {
-                    var items = await CodexRolloutMessagesReader.ReadAssistantMessagesAsync(rolloutPath, count, ct);
-                    foreach (var item in items)
-                    {
-                        if (queue.Count == count)
-                        {
-                            queue.Dequeue();
-                        }
-
-                        queue.Enqueue(new { createdAt = item.CreatedAt, text = item.Text });
-                    }
+                    history.Add((item.CreatedAt, item.Text));
                 }
             }
 
-            return Results.Ok(new { items = queue.ToArray() });
+            var snapshotPending = backlog.SnapshotPending(runId);
+            if (snapshotPending.Count > tailEvents)
+            {
+                snapshotPending = snapshotPending.Skip(snapshotPending.Count - tailEvents).ToArray();
+            }
+
+            var pending = new List<(DateTimeOffset CreatedAt, string Text)>();
+            foreach (var (createdAt, text) in ExtractCompletedMessages(snapshotPending))
+            {
+                pending.Add((createdAt, text));
+            }
+
+            var overlap = FindMessageOverlap(history, pending);
+
+            var combined = new List<(DateTimeOffset CreatedAt, string Text)>(history.Count + pending.Count - overlap);
+            combined.AddRange(history);
+            for (var i = overlap; i < pending.Count; i++)
+            {
+                combined.Add(pending[i]);
+            }
+
+            if (combined.Count > count)
+            {
+                combined = combined.Skip(combined.Count - count).ToList();
+            }
+
+            return Results.Ok(new { items = combined.Select(x => new { createdAt = x.CreatedAt, text = x.Text }).ToArray() });
         });
 
-        app.MapGet("/v1/runs/{runId:guid}/thinking-summaries", async (Guid runId, HttpRequest req, RunStore store, CancellationToken ct) =>
+        app.MapGet("/v1/runs/{runId:guid}/thinking-summaries", async (Guid runId, HttpRequest req, RunStore store, RunNotificationBacklog backlog, CancellationToken ct) =>
         {
             var record = await store.TryGetAsync(runId, ct);
             if (record is null)
@@ -439,20 +468,45 @@ public static class Host
             tailEvents = Math.Min(tailEvents, 200000);
 
             var dir = await store.TryResolveRunDirectoryAsync(runId, ct);
-            if (dir is not null && HasRawEventsFile(dir))
+            var hasRawEvents = dir is not null && HasRawEventsFile(dir);
+            if (hasRawEvents)
             {
-                var summaries = ThinkingSummaries.FromRawEvents(await store.ReadRawEventsAsync(runId, tailEvents, ct));
+                var raw = await store.ReadRawEventsAsync(runId, tailEvents, ct);
+                var maxNotificationAt = raw.Where(e => string.Equals(e.Type, "codex.notification", StringComparison.Ordinal))
+                    .Select(e => (DateTimeOffset?)e.CreatedAt)
+                    .Max();
+
+                var pending = backlog.SnapshotAfter(runId, maxNotificationAt);
+                if (pending.Count > tailEvents)
+                {
+                    pending = pending.Skip(pending.Count - tailEvents).ToArray();
+                }
+
+                var combined = raw.Concat(pending).ToArray();
+                var summaries = ThinkingSummaries.FromRawEvents(combined);
                 return Results.Ok(new { items = summaries });
             }
 
             var rolloutPath = CodexRolloutPathNormalizer.Normalize(record.CodexRolloutPath);
             if (!string.IsNullOrWhiteSpace(rolloutPath) && File.Exists(rolloutPath))
             {
-                var summaries = ThinkingSummaries.FromCodexRollout(rolloutPath, tailEvents, ct);
+                var pending = backlog.SnapshotPending(runId);
+                if (pending.Count > tailEvents)
+                {
+                    pending = pending.Skip(pending.Count - tailEvents).ToArray();
+                }
+
+                var summaries = ThinkingSummaries.FromCodexRolloutThenRawEvents(rolloutPath, pending, ct);
                 return Results.Ok(new { items = summaries });
             }
 
-            return Results.Ok(new { items = Array.Empty<string>() });
+            var snapshot = backlog.SnapshotAfter(runId, afterExclusive: null);
+            if (snapshot.Count > tailEvents)
+            {
+                snapshot = snapshot.Skip(snapshot.Count - tailEvents).ToArray();
+            }
+
+            return Results.Ok(new { items = ThinkingSummaries.FromRawEvents(snapshot) });
         });
 
         app.MapGet("/v1/runs/{runId:guid}/events", async (Guid runId, HttpContext ctx, RunStore store, RunEventBroadcaster broadcaster, RunNotificationBacklog backlog, CodexRolloutRollupReader rolloutReader) =>
@@ -719,6 +773,71 @@ public static class Host
         });
 
         return app;
+    }
+
+    private static int FindMessageOverlap(
+        IReadOnlyList<(DateTimeOffset CreatedAt, string Text)> history,
+        IReadOnlyList<(DateTimeOffset CreatedAt, string Text)> pending)
+    {
+        if (history.Count == 0 || pending.Count == 0)
+        {
+            return 0;
+        }
+
+        var createdAtTolerance = TimeSpan.FromSeconds(5);
+        var maxOverlap = Math.Min(history.Count, pending.Count);
+        for (var overlap = maxOverlap; overlap >= 1; overlap--)
+        {
+            var historyStart = history.Count - overlap;
+            var match = true;
+            for (var i = 0; i < overlap; i++)
+            {
+                var h = history[historyStart + i];
+                var p = pending[i];
+                if (!string.Equals(h.Text, p.Text, StringComparison.Ordinal) ||
+                    (h.CreatedAt - p.CreatedAt).Duration() > createdAtTolerance)
+                {
+                    match = false;
+                    break;
+                }
+            }
+
+            if (match)
+            {
+                return overlap;
+            }
+        }
+
+        return 0;
+    }
+
+    private static IEnumerable<(DateTimeOffset CreatedAt, string Text)> ExtractCompletedMessages(IEnumerable<RunEventEnvelope> events)
+    {
+        foreach (var env in events)
+        {
+            if (!string.Equals(env.Type, "codex.notification", StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            if (!RunEventDataExtractors.TryGetCompletedAgentMessageText(env.Data, out var text) ||
+                string.IsNullOrWhiteSpace(text))
+            {
+                continue;
+            }
+
+            yield return (env.CreatedAt, text);
+        }
+    }
+
+    private static void EnqueueCompletedMessage(Queue<object> queue, int maxCount, DateTimeOffset createdAt, string text)
+    {
+        if (queue.Count == maxCount)
+        {
+            queue.Dequeue();
+        }
+
+        queue.Enqueue(new { createdAt, text });
     }
 
     private static bool HasRawEventsFile(string runDirectory) =>

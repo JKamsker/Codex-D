@@ -1,6 +1,6 @@
 using System.ComponentModel;
-using System.Text.Json;
 using CodexD.HttpRunner.Client;
+using CodexD.Shared.Output;
 using Spectre.Console;
 using Spectre.Console.Cli;
 
@@ -17,6 +17,23 @@ public sealed class StopCommand : AsyncCommand<StopCommand.Settings>
 
     public override async Task<int> ExecuteAsync(CommandContext context, Settings settings, CancellationToken cancellationToken)
     {
+        OutputFormat format;
+        try
+        {
+            format = settings.ResolveOutputFormat(OutputFormatUsage.Single);
+        }
+        catch (ArgumentException ex)
+        {
+            if (settings.Json || !string.IsNullOrWhiteSpace(settings.OutputFormat))
+            {
+                CliOutput.WriteJsonError("invalid_outputformat", ex.Message);
+                return 2;
+            }
+
+            Console.Error.WriteLine(ex.Message);
+            return 2;
+        }
+
         ResolvedClientSettings resolved;
         try
         {
@@ -24,13 +41,27 @@ public sealed class StopCommand : AsyncCommand<StopCommand.Settings>
         }
         catch (RunnerResolutionFailure ex)
         {
-            Console.Error.WriteLine(ex.UserMessage);
+            if (format != OutputFormat.Human)
+            {
+                CliOutput.WriteJsonError("runner_not_found", ex.UserMessage);
+            }
+            else
+            {
+                Console.Error.WriteLine(ex.UserMessage);
+            }
             return 1;
         }
 
         if (string.IsNullOrWhiteSpace(settings.RunId) || !Guid.TryParse(settings.RunId, out var runId))
         {
-            AnsiConsole.MarkupLine("[red]Missing or invalid RUN_ID.[/]");
+            if (format != OutputFormat.Human)
+            {
+                CliOutput.WriteJsonError("invalid_run_id", "Missing or invalid RUN_ID.");
+            }
+            else
+            {
+                AnsiConsole.MarkupLine("[red]Missing or invalid RUN_ID.[/]");
+            }
             return 2;
         }
 
@@ -42,13 +73,20 @@ public sealed class StopCommand : AsyncCommand<StopCommand.Settings>
         }
         catch (Exception ex)
         {
-            AnsiConsole.MarkupLine($"[red]Failed to stop run:[/] {Markup.Escape(ex.Message ?? string.Empty)}");
+            if (format != OutputFormat.Human)
+            {
+                CliOutput.WriteJsonError("stop_failed", ex.Message ?? string.Empty);
+            }
+            else
+            {
+                AnsiConsole.MarkupLine($"[red]Failed to stop run:[/] {Markup.Escape(ex.Message ?? string.Empty)}");
+            }
             return 1;
         }
 
-        if (settings.Json)
+        if (format != OutputFormat.Human)
         {
-            WriteJsonLine(new { eventName = "run.stop_requested", runId });
+            CliOutput.WriteJsonLine(new { eventName = "run.stop_requested", runId });
         }
         else
         {
@@ -56,11 +94,5 @@ public sealed class StopCommand : AsyncCommand<StopCommand.Settings>
         }
 
         return 0;
-    }
-
-    private static void WriteJsonLine(object value)
-    {
-        var json = JsonSerializer.Serialize(value, new JsonSerializerOptions(JsonSerializerDefaults.Web));
-        Console.Out.WriteLine(json);
     }
 }

@@ -3,6 +3,7 @@ using CodexD.CloudRunner.Commands;
 using CodexD.CloudRunner.Configuration;
 using CodexD.CloudRunner.Connection;
 using CodexD.CloudRunner.State;
+using CodexD.Shared.Output;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
@@ -38,10 +39,37 @@ public sealed class ServeCommand : AsyncCommand<ServeCommand.Settings>
         [CommandOption("--heartbeat-interval <DURATION>")]
         [Description("Heartbeat interval. Examples: 5s, 250ms, 00:00:05. Env: CODEXWEBUI_RUNNER_HEARTBEAT_INTERVAL")]
         public string? HeartbeatInterval { get; init; }
+
+        [CommandOption("--output-format|--outputformat <FORMAT>")]
+        [Description("Output format: human, json, or jsonl. Default: human. For long-running commands, 'json' behaves like 'jsonl'.")]
+        public string? OutputFormat { get; init; }
+
+        [CommandOption("--json")]
+        [Description("Deprecated. Use --outputformat json/jsonl.")]
+        public bool Json { get; init; }
     }
 
     public override async Task<int> ExecuteAsync(CommandContext context, Settings settings, CancellationToken cancellationToken)
     {
+        OutputFormat format;
+        try
+        {
+            format = OutputFormatParser.Resolve(settings.OutputFormat, settings.Json, OutputFormatUsage.Streaming);
+        }
+        catch (ArgumentException ex)
+        {
+            if (settings.Json || !string.IsNullOrWhiteSpace(settings.OutputFormat))
+            {
+                CliOutput.WriteJsonError("invalid_outputformat", ex.Message);
+                return 2;
+            }
+
+            Console.Error.WriteLine(ex.Message);
+            return 2;
+        }
+
+        var json = format != OutputFormat.Human;
+
         AppOptions options;
         try
         {
@@ -49,18 +77,32 @@ public sealed class ServeCommand : AsyncCommand<ServeCommand.Settings>
         }
         catch (ConfigurationException ex)
         {
-            AnsiConsole.MarkupLine($"[red]{ex.Message.EscapeMarkup()}[/]");
+            if (json)
+            {
+                CliOutput.WriteJsonError("config_invalid", ex.Message);
+            }
+            else
+            {
+                AnsiConsole.MarkupLine($"[red]{ex.Message.EscapeMarkup()}[/]");
+            }
             return 2;
         }
 
         var builder = Host.CreateApplicationBuilder(args: Array.Empty<string>());
 
         builder.Logging.ClearProviders();
-        builder.Logging.AddSimpleConsole(x =>
+        if (json)
         {
-            x.SingleLine = true;
-            x.TimestampFormat = "HH:mm:ss ";
-        });
+            builder.Logging.AddJsonConsole();
+        }
+        else
+        {
+            builder.Logging.AddSimpleConsole(x =>
+            {
+                x.SingleLine = true;
+                x.TimestampFormat = "HH:mm:ss ";
+            });
+        }
 
         builder.Services.AddSingleton(options);
         builder.Services.AddSingleton<IdentityStore>();
@@ -82,6 +124,10 @@ public sealed class ServeCommand : AsyncCommand<ServeCommand.Settings>
         {
             var logger = host.Services.GetRequiredService<ILoggerFactory>().CreateLogger("Runner");
             logger.LogError(ex, "Runner terminated unexpectedly.");
+            if (json)
+            {
+                CliOutput.WriteJsonError("runner_failed", ex.Message ?? string.Empty);
+            }
             return 1;
         }
     }

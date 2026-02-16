@@ -56,10 +56,7 @@ public sealed class CodexReviewRunExecutor : IRunExecutor
             BaseBranch = string.IsNullOrWhiteSpace(review.BaseBranch) ? null : review.BaseBranch.Trim(),
             CommitSha = string.IsNullOrWhiteSpace(review.CommitSha) ? null : review.CommitSha.Trim(),
             Title = string.IsNullOrWhiteSpace(review.Title) ? null : review.Title.Trim(),
-            AdditionalOptions = review.AdditionalOptions
-                .Select(x => x.Trim())
-                .Where(x => !string.IsNullOrWhiteSpace(x))
-                .ToArray()
+            AdditionalOptions = BuildReviewAdditionalOptions(review.AdditionalOptions, context.Effort)
         };
 
         var prompt = (context.Prompt ?? string.Empty).Trim();
@@ -91,6 +88,23 @@ public sealed class CodexReviewRunExecutor : IRunExecutor
 
             await using var client = new JKToolKit.CodexSDK.Exec.CodexClient();
             var result = await client.ReviewAsync(options, stdoutWriter, stderrWriter, linked.Token);
+
+            if (!string.IsNullOrWhiteSpace(result.LogPath))
+            {
+                try
+                {
+                    await context.SetCodexIdsAsync("review", null, result.LogPath, linked.Token);
+                }
+                catch (Exception ex) when (ex is not OperationCanceledException)
+                {
+                    _logger.LogWarning(
+                        ex,
+                        "Failed to update Codex IDs with review log path {LogPath} for run {RunId} (Cwd: {Cwd}).",
+                        result.LogPath,
+                        context.RunId,
+                        context.Cwd);
+                }
+            }
 
             var status = result.ExitCode == 0 ? RunStatuses.Succeeded : RunStatuses.Failed;
             var error = result.ExitCode == 0 ? null : LimitError(result.StandardError);
@@ -262,6 +276,65 @@ public sealed class CodexReviewRunExecutor : IRunExecutor
         }
 
         return CodexApprovalPolicy.Never;
+    }
+
+    private static string[] BuildReviewAdditionalOptions(string[] raw, string? effort)
+    {
+        var args = raw
+            .Select(x => x?.Trim())
+            .Where(x => !string.IsNullOrWhiteSpace(x))
+            .Select(x => x!)
+            .ToList();
+
+        var effortValue = string.IsNullOrWhiteSpace(effort) ? null : effort.Trim();
+        if (string.IsNullOrWhiteSpace(effortValue))
+        {
+            return args.ToArray();
+        }
+
+        if (!HasModelReasoningEffortConfig(args))
+        {
+            args.Add("--config");
+            args.Add($"model_reasoning_effort={effortValue}");
+        }
+
+        return args.ToArray();
+    }
+
+    private static bool HasModelReasoningEffortConfig(IReadOnlyList<string> args)
+    {
+        for (var i = 0; i < args.Count; i++)
+        {
+            var a = args[i];
+
+            if (a.Equals("--config", StringComparison.OrdinalIgnoreCase) ||
+                a.Equals("-c", StringComparison.OrdinalIgnoreCase))
+            {
+                if (i + 1 < args.Count &&
+                    args[i + 1].StartsWith("model_reasoning_effort=", StringComparison.OrdinalIgnoreCase))
+                {
+                    return true;
+                }
+
+                continue;
+            }
+
+            if (a.StartsWith("--config=", StringComparison.OrdinalIgnoreCase) ||
+                a.StartsWith("-c=", StringComparison.OrdinalIgnoreCase))
+            {
+                var idx = a.IndexOf('=');
+                if (idx > 0 && idx + 1 < a.Length)
+                {
+                    var value = a[(idx + 1)..];
+                    if (value.StartsWith("model_reasoning_effort=", StringComparison.OrdinalIgnoreCase))
+                    {
+                        return true;
+                    }
+                }
+            }
+        }
+
+        return false;
     }
 
     private RunExecutionResult MapCompletion(JKToolKit.CodexSDK.AppServer.Notifications.TurnCompletedNotification completed)

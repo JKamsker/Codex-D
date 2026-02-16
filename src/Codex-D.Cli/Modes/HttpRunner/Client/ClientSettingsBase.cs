@@ -1,7 +1,9 @@
 using System.ComponentModel;
 using CodexD.HttpRunner.Daemon;
 using CodexD.HttpRunner.State;
+using CodexD.Shared.Output;
 using CodexD.Shared.Paths;
+using CodexD.Shared.Strings;
 using Spectre.Console.Cli;
 
 namespace CodexD.HttpRunner.Client;
@@ -20,9 +22,16 @@ public abstract class ClientSettingsBase : CommandSettings
     [Description("Working directory (exact-match filtering for ls/--last). Default: current directory")]
     public string? Cd { get; init; }
 
+    [CommandOption("--output-format|--outputformat <FORMAT>")]
+    [Description("Output format: human, json, or jsonl. Default: human. For streaming commands, 'json' behaves like 'jsonl'.")]
+    public string? OutputFormat { get; init; }
+
     [CommandOption("--json")]
-    [Description("Print JSONL events (client-side envelope) instead of human-friendly output.")]
+    [Description("Deprecated. Use --outputformat json/jsonl. For streaming commands this outputs JSONL events (client-side envelope).")]
     public bool Json { get; init; }
+
+    public OutputFormat ResolveOutputFormat(OutputFormatUsage usage) =>
+        OutputFormatParser.Resolve(OutputFormat, Json, usage);
 
     public async Task<ResolvedClientSettings> ResolveAsync(CancellationToken ct)
     {
@@ -32,14 +41,14 @@ public abstract class ClientSettingsBase : CommandSettings
         cwd = PathPolicy.TrimTrailingSeparators(Path.GetFullPath(cwd));
 
         var explicitUrl =
-            TrimOrNull(Url) ??
-            TrimOrNull(Environment.GetEnvironmentVariable("CODEX_D_URL")) ??
-            TrimOrNull(Environment.GetEnvironmentVariable("CODEX_RUNNER_URL"));
+            StringHelpers.TrimOrNull(Url) ??
+            StringHelpers.TrimOrNull(Environment.GetEnvironmentVariable("CODEX_D_URL")) ??
+            StringHelpers.TrimOrNull(Environment.GetEnvironmentVariable("CODEX_RUNNER_URL"));
 
         var explicitToken =
-            TrimOrNull(Token) ??
-            TrimOrNull(Environment.GetEnvironmentVariable("CODEX_D_TOKEN")) ??
-            TrimOrNull(Environment.GetEnvironmentVariable("CODEX_RUNNER_TOKEN"));
+            StringHelpers.TrimOrNull(Token) ??
+            StringHelpers.TrimOrNull(Environment.GetEnvironmentVariable("CODEX_D_TOKEN")) ??
+            StringHelpers.TrimOrNull(Environment.GetEnvironmentVariable("CODEX_RUNNER_TOKEN"));
 
         if (!string.IsNullOrWhiteSpace(explicitUrl))
         {
@@ -47,7 +56,7 @@ public abstract class ClientSettingsBase : CommandSettings
         }
 
         var daemonStateDir =
-            TrimOrNull(Environment.GetEnvironmentVariable("CODEX_D_DAEMON_STATE_DIR")) ??
+            StringHelpers.TrimOrNull(Environment.GetEnvironmentVariable("CODEX_D_DAEMON_STATE_DIR")) ??
             StatePaths.GetDefaultDaemonStateDir(isDev);
 
         var daemonRuntimePath = Path.Combine(daemonStateDir, "daemon.runtime.json");
@@ -115,12 +124,9 @@ Or start a foreground server (project-local):
   codex-d http serve");
     }
 
-    private static string? TrimOrNull(string? value) =>
-        string.IsNullOrWhiteSpace(value) ? null : value.Trim();
-
     private static int? TryGetEnvInt(string name)
     {
-        var raw = TrimOrNull(Environment.GetEnvironmentVariable(name));
+        var raw = StringHelpers.TrimOrNull(Environment.GetEnvironmentVariable(name));
         return int.TryParse(raw, out var i) ? i : null;
     }
 }

@@ -1,5 +1,6 @@
 using CodexD.HttpRunner.Client;
 using CodexD.HttpRunner.State;
+using CodexD.Shared.Output;
 using CodexD.Shared.Paths;
 using Xunit;
 
@@ -9,6 +10,27 @@ public sealed class ClientSettingsBaseTests
 {
     private sealed class Settings : ClientSettingsBase
     {
+    }
+
+    [Fact]
+    public void ResolveOutputFormat_Default_IsHuman()
+    {
+        var s = new Settings();
+        Assert.Equal(OutputFormat.Human, s.ResolveOutputFormat(OutputFormatUsage.Single));
+    }
+
+    [Fact]
+    public void ResolveOutputFormat_JsonFlag_Single_IsJson()
+    {
+        var s = new Settings { Json = true };
+        Assert.Equal(OutputFormat.Json, s.ResolveOutputFormat(OutputFormatUsage.Single));
+    }
+
+    [Fact]
+    public void ResolveOutputFormat_JsonFlag_Streaming_IsJsonl()
+    {
+        var s = new Settings { Json = true };
+        Assert.Equal(OutputFormat.Jsonl, s.ResolveOutputFormat(OutputFormatUsage.Streaming));
     }
 
     [Fact]

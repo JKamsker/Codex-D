@@ -6,6 +6,8 @@ using CodexD.HttpRunner.Client;
 using CodexD.HttpRunner.Daemon;
 using CodexD.HttpRunner.Server;
 using CodexD.HttpRunner.State;
+using CodexD.Shared.Output;
+using CodexD.Shared.Strings;
 using Microsoft.Extensions.Hosting;
 using Spectre.Console;
 using Spectre.Console.Cli;
@@ -57,34 +59,77 @@ public sealed class ServeCommand : AsyncCommand<ServeCommand.Settings>
         [CommandOption("--persist-raw-events")]
         [Description("Persist raw differential events to events.jsonl (debugging). Default: false (in-memory backlog + Codex rollout replay).")]
         public bool PersistRawEvents { get; init; }
+
+        [CommandOption("--output-format|--outputformat <FORMAT>")]
+        [Description("Output format: human, json, or jsonl. Default: human. For long-running commands, 'json' behaves like 'jsonl'.")]
+        public string? OutputFormat { get; init; }
+
+        [CommandOption("--json")]
+        [Description("Deprecated. Use --outputformat json/jsonl.")]
+        public bool Json { get; init; }
     }
 
     public override async Task<int> ExecuteAsync(CommandContext context, Settings settings, CancellationToken cancellationToken)
     {
+        OutputFormat format;
+        try
+        {
+            format = OutputFormatParser.Resolve(settings.OutputFormat, settings.Json, OutputFormatUsage.Streaming);
+        }
+        catch (ArgumentException ex)
+        {
+            if (settings.Json || !string.IsNullOrWhiteSpace(settings.OutputFormat))
+            {
+                CliOutput.WriteJsonError("invalid_outputformat", ex.Message);
+                return 2;
+            }
+
+            Console.Error.WriteLine(ex.Message);
+            return 2;
+        }
+
+        var json = format != OutputFormat.Human;
+
         if (settings.Daemon || settings.DaemonChild)
         {
             if (!OperatingSystem.IsWindows())
             {
-                AnsiConsole.MarkupLine("[red]Daemon mode is currently supported only on Windows.[/] Use [grey]codex-d http serve[/] (foreground) instead.");
+                if (json)
+                {
+                    CliOutput.WriteJsonError("unsupported", "Daemon mode is currently supported only on Windows. Use `codex-d http serve` (foreground) instead.");
+                }
+                else
+                {
+                    AnsiConsole.MarkupLine("[red]Daemon mode is currently supported only on Windows.[/] Use [grey]codex-d http serve[/] (foreground) instead.");
+                }
                 return 2;
             }
 
             if (settings.DaemonChild)
             {
-                return await RunDaemonChildAsync(settings, cancellationToken);
+                return await RunDaemonChildAsync(settings, format, cancellationToken);
             }
 
-            return await RunDaemonParentAsync(settings, cancellationToken);
+            return await RunDaemonParentAsync(settings, format, cancellationToken);
         }
 
-        return await RunForegroundAsync(settings, cancellationToken);
+        return await RunForegroundAsync(settings, format, cancellationToken);
     }
 
-    private static async Task<int> RunForegroundAsync(Settings settings, CancellationToken cancellationToken)
+    private static async Task<int> RunForegroundAsync(Settings settings, OutputFormat format, CancellationToken cancellationToken)
     {
+        var json = format != OutputFormat.Human;
+
         if (!IPAddress.TryParse(settings.Listen, out var listen) || listen is null)
         {
-            AnsiConsole.MarkupLine($"[red]Invalid --listen IP:[/] {settings.Listen}");
+            if (json)
+            {
+                CliOutput.WriteJsonError("invalid_listen", $"Invalid --listen IP: {settings.Listen}");
+            }
+            else
+            {
+                AnsiConsole.MarkupLine($"[red]Invalid --listen IP:[/] {Markup.Escape(settings.Listen)}");
+            }
             return 2;
         }
 
@@ -92,12 +137,19 @@ public sealed class ServeCommand : AsyncCommand<ServeCommand.Settings>
         var port = settings.Port ?? TryGetEnvInt("CODEX_D_FOREGROUND_PORT") ?? StatePaths.GetDefaultForegroundPort(isDev);
         if (port is <= 0 or > 65535)
         {
-            AnsiConsole.MarkupLine($"[red]Invalid --port:[/] {port}");
+            if (json)
+            {
+                CliOutput.WriteJsonError("invalid_port", $"Invalid --port: {port}");
+            }
+            else
+            {
+                AnsiConsole.MarkupLine($"[red]Invalid --port:[/] {port}");
+            }
             return 2;
         }
 
         var stateDirRaw = string.IsNullOrWhiteSpace(settings.StateDir)
-            ? TrimOrNull(Environment.GetEnvironmentVariable("CODEX_D_FOREGROUND_STATE_DIR")) ??
+            ? StringHelpers.TrimOrNull(Environment.GetEnvironmentVariable("CODEX_D_FOREGROUND_STATE_DIR")) ??
               StatePaths.GetForegroundStateDir(Directory.GetCurrentDirectory())
             : settings.StateDir;
 
@@ -105,7 +157,7 @@ public sealed class ServeCommand : AsyncCommand<ServeCommand.Settings>
 
         var identityFile = StatePaths.IdentityFile(stateDir);
         var identityStore = new IdentityStore(identityFile);
-        var tokenOverride = TrimOrNull(settings.Token) ?? TryGetEnvTokenOverride();
+        var tokenOverride = StringHelpers.TrimOrNull(settings.Token) ?? TryGetEnvTokenOverride();
         var identity = await identityStore.LoadOrCreateAsync(tokenOverride, cancellationToken);
 
         var isLoopback = IPAddress.IsLoopback(listen);
@@ -123,10 +175,27 @@ public sealed class ServeCommand : AsyncCommand<ServeCommand.Settings>
             StateDirectory = stateDir,
             Identity = identity,
             StartedAtUtc = DateTimeOffset.UtcNow,
-            PersistRawEvents = settings.PersistRawEvents || (TryGetEnvBool("CODEX_D_PERSIST_RAW_EVENTS") ?? false)
+            PersistRawEvents = settings.PersistRawEvents || (TryGetEnvBool("CODEX_D_PERSIST_RAW_EVENTS") ?? false),
+            JsonLogs = json
         };
 
-        PrintBanner(config, isLoopback);
+        if (json)
+        {
+            CliOutput.WriteJsonLine(new
+            {
+                eventName = "server.started",
+                baseUrl = config.BaseUrl,
+                runnerId = config.Identity.RunnerId,
+                stateDir = config.StateDirectory,
+                requireAuth = config.RequireAuth,
+                listen = config.ListenAddress.ToString(),
+                port = config.Port
+            });
+        }
+        else
+        {
+            PrintBanner(config, isLoopback);
+        }
 
         var app = RunnerHost.Build(config);
         using var reg = cancellationToken.Register(() => app.Lifetime.StopApplication());
@@ -134,25 +203,40 @@ public sealed class ServeCommand : AsyncCommand<ServeCommand.Settings>
         return 0;
     }
 
-    private static async Task<int> RunDaemonParentAsync(Settings settings, CancellationToken cancellationToken)
+    private static async Task<int> RunDaemonParentAsync(Settings settings, OutputFormat format, CancellationToken cancellationToken)
     {
+        var json = format != OutputFormat.Human;
         var isDev = BuildMode.IsDev();
 
         if (!IPAddress.TryParse(settings.Listen, out var listen) || listen is null)
         {
-            AnsiConsole.MarkupLine($"[red]Invalid --listen IP:[/] {settings.Listen}");
+            if (json)
+            {
+                CliOutput.WriteJsonError("invalid_listen", $"Invalid --listen IP: {settings.Listen}");
+            }
+            else
+            {
+                AnsiConsole.MarkupLine($"[red]Invalid --listen IP:[/] {Markup.Escape(settings.Listen)}");
+            }
             return 2;
         }
 
         var port = settings.Port ?? TryGetEnvInt("CODEX_D_DAEMON_PORT") ?? StatePaths.DEFAULT_DAEMON_PORT;
         if (port is < 0 or > 65535)
         {
-            AnsiConsole.MarkupLine($"[red]Invalid --port:[/] {port}");
+            if (json)
+            {
+                CliOutput.WriteJsonError("invalid_port", $"Invalid --port: {port}");
+            }
+            else
+            {
+                AnsiConsole.MarkupLine($"[red]Invalid --port:[/] {port}");
+            }
             return 2;
         }
 
         var stateDirRaw = string.IsNullOrWhiteSpace(settings.StateDir)
-            ? TrimOrNull(Environment.GetEnvironmentVariable("CODEX_D_DAEMON_STATE_DIR")) ?? StatePaths.GetDefaultDaemonStateDir(isDev)
+            ? StringHelpers.TrimOrNull(Environment.GetEnvironmentVariable("CODEX_D_DAEMON_STATE_DIR")) ?? StatePaths.GetDefaultDaemonStateDir(isDev)
             : settings.StateDir;
 
         var stateDir = Path.GetFullPath(stateDirRaw);
@@ -165,13 +249,26 @@ public sealed class ServeCommand : AsyncCommand<ServeCommand.Settings>
 
         var desiredVersion = await GetDesiredDaemonVersionAsync(isDev, cancellationToken);
         var installedVersion = TryReadMarker(Path.Combine(daemonBinDir, ".version"));
-        var tokenOverride = TrimOrNull(settings.Token) ?? TryGetEnvTokenOverride();
+        var tokenOverride = StringHelpers.TrimOrNull(settings.Token) ?? TryGetEnvTokenOverride();
 
         if (settings.Force || isDev || !string.Equals(installedVersion, desiredVersion, StringComparison.Ordinal))
         {
             var installedDisplay = installedVersion ?? "<none>";
-            AnsiConsole.MarkupLine($"[grey]Daemon install dir:[/] {daemonBinDir}");
-            AnsiConsole.MarkupLine($"[grey]Daemon version:[/] desired={desiredVersion} installed={installedDisplay}");
+            if (json)
+            {
+                CliOutput.WriteJsonLine(new
+                {
+                    eventName = "daemon.version",
+                    installDir = daemonBinDir,
+                    desired = desiredVersion,
+                    installed = installedDisplay
+                });
+            }
+            else
+            {
+                AnsiConsole.MarkupLine($"[grey]Daemon install dir:[/] {Markup.Escape(daemonBinDir)}");
+                AnsiConsole.MarkupLine($"[grey]Daemon version:[/] desired={Markup.Escape(desiredVersion)} installed={Markup.Escape(installedDisplay)}");
+            }
         }
 
         if (DaemonRuntimeFile.TryRead(runtimePath, out var runtime) && runtime is not null)
@@ -189,15 +286,29 @@ public sealed class ServeCommand : AsyncCommand<ServeCommand.Settings>
                 if (settings.Force || needsDevReplace)
                 {
                     var reason = settings.Force ? "--force" : "dev version mismatch";
-                    AnsiConsole.MarkupLine($"[grey]Stopping existing daemon (pid {runtime.Pid}) due to {reason}...[/]");
+                    if (json)
+                    {
+                        CliOutput.WriteJsonLine(new { eventName = "daemon.stop", pid = runtime.Pid, reason });
+                    }
+                    else
+                    {
+                        AnsiConsole.MarkupLine($"[grey]Stopping existing daemon (pid {runtime.Pid}) due to {reason}...[/]");
+                    }
                     await StopDaemonAsync(runtimePath, runtime.Pid, cancellationToken);
                 }
                 else
                 {
-                    AnsiConsole.Write(new Rule("[bold]codex-d http serve -d[/]").LeftJustified());
-                    AnsiConsole.MarkupLine($"Daemon URL: [cyan]{runtime.BaseUrl}[/]");
-                    AnsiConsole.MarkupLine($"StateDir: [grey]{stateDir}[/]");
-                    AnsiConsole.WriteLine();
+                    if (json)
+                    {
+                        CliOutput.WriteJsonLine(new { eventName = "daemon.already_running", baseUrl = runtime.BaseUrl, stateDir });
+                    }
+                    else
+                    {
+                        AnsiConsole.Write(new Rule("[bold]codex-d http serve -d[/]").LeftJustified());
+                        AnsiConsole.MarkupLine($"Daemon URL: [cyan]{Markup.Escape(runtime.BaseUrl)}[/]");
+                        AnsiConsole.MarkupLine($"StateDir: [grey]{Markup.Escape(stateDir)}[/]");
+                        AnsiConsole.WriteLine();
+                    }
                     return 0;
                 }
             }
@@ -206,20 +317,44 @@ public sealed class ServeCommand : AsyncCommand<ServeCommand.Settings>
                 var running = IsProcessRunning(runtime.Pid);
                 if (running && !(settings.Force || isDev))
                 {
-                    AnsiConsole.MarkupLine("[red]Daemon appears to be running but is unreachable.[/] Use [grey]--force[/] to stop and replace it.");
-                    AnsiConsole.MarkupLine($"StateDir: [grey]{stateDir}[/]");
+                    if (json)
+                    {
+                        CliOutput.WriteJsonError(
+                            "daemon_unreachable",
+                            "Daemon appears to be running but is unreachable. Use --force to stop and replace it.",
+                            new { stateDir });
+                    }
+                    else
+                    {
+                        AnsiConsole.MarkupLine("[red]Daemon appears to be running but is unreachable.[/] Use [grey]--force[/] to stop and replace it.");
+                        AnsiConsole.MarkupLine($"StateDir: [grey]{Markup.Escape(stateDir)}[/]");
+                    }
                     return 1;
                 }
 
                 if (running)
                 {
                     var reason = settings.Force ? "--force" : "dev mode restart";
-                    AnsiConsole.MarkupLine($"[grey]Stopping unreachable daemon (pid {runtime.Pid}) due to {reason}...[/]");
+                    if (json)
+                    {
+                        CliOutput.WriteJsonLine(new { eventName = "daemon.stop", pid = runtime.Pid, reason });
+                    }
+                    else
+                    {
+                        AnsiConsole.MarkupLine($"[grey]Stopping unreachable daemon (pid {runtime.Pid}) due to {reason}...[/]");
+                    }
                     await StopDaemonAsync(runtimePath, runtime.Pid, cancellationToken);
                 }
                 else
                 {
-                    AnsiConsole.MarkupLine("[grey]Removing stale daemon runtime file...[/]");
+                    if (json)
+                    {
+                        CliOutput.WriteJsonLine(new { eventName = "daemon.runtime.remove_stale", runtimePath });
+                    }
+                    else
+                    {
+                        AnsiConsole.MarkupLine("[grey]Removing stale daemon runtime file...[/]");
+                    }
                     TryDeleteFile(runtimePath);
                 }
             }
@@ -249,31 +384,72 @@ public sealed class ServeCommand : AsyncCommand<ServeCommand.Settings>
             args.Add("--persist-raw-events");
         }
 
+        if (format != OutputFormat.Human)
+        {
+            args.Add("--outputformat");
+            args.Add(format == OutputFormat.Json ? "json" : "jsonl");
+        }
+
         try
         {
             if (shouldInstall)
             {
                 var reason = settings.Force ? "--force" : "version mismatch";
-                AnsiConsole.MarkupLine($"[grey]Installing daemon binaries ({reason})...[/]");
+                if (json)
+                {
+                    CliOutput.WriteJsonLine(new { eventName = "daemon.install", reason });
+                }
+                else
+                {
+                    AnsiConsole.MarkupLine($"[grey]Installing daemon binaries ({reason})...[/]");
+                }
 
                 var copied = await DaemonSelfInstaller.InstallSelfAsync(daemonBinDir, desiredVersion, installForce, cancellationToken);
                 if (copied)
                 {
-                    AnsiConsole.MarkupLine("[grey]Copied daemon binaries and updated .version marker.[/]");
+                    if (json)
+                    {
+                        CliOutput.WriteJsonLine(new { eventName = "daemon.install.completed", copied = true });
+                    }
+                    else
+                    {
+                        AnsiConsole.MarkupLine("[grey]Copied daemon binaries and updated .version marker.[/]");
+                    }
                 }
                 else
                 {
-                    AnsiConsole.MarkupLine("[grey]Daemon binaries already up-to-date; no copy needed.[/]");
+                    if (json)
+                    {
+                        CliOutput.WriteJsonLine(new { eventName = "daemon.install.completed", copied = false });
+                    }
+                    else
+                    {
+                        AnsiConsole.MarkupLine("[grey]Daemon binaries already up-to-date; no copy needed.[/]");
+                    }
                 }
             }
             else
             {
-                AnsiConsole.MarkupLine("[grey]Daemon binaries already up-to-date; starting daemon.[/]");
+                if (json)
+                {
+                    CliOutput.WriteJsonLine(new { eventName = "daemon.install.skipped" });
+                }
+                else
+                {
+                    AnsiConsole.MarkupLine("[grey]Daemon binaries already up-to-date; starting daemon.[/]");
+                }
             }
         }
         catch (Exception ex)
         {
-            AnsiConsole.MarkupLine($"[red]Failed to install daemon binaries:[/] {Markup.Escape(ex.Message ?? string.Empty)}");
+            if (json)
+            {
+                CliOutput.WriteJsonError("daemon_install_failed", ex.Message ?? string.Empty);
+            }
+            else
+            {
+                AnsiConsole.MarkupLine($"[red]Failed to install daemon binaries:[/] {Markup.Escape(ex.Message ?? string.Empty)}");
+            }
             return 1;
         }
 
@@ -291,13 +467,27 @@ public sealed class ServeCommand : AsyncCommand<ServeCommand.Settings>
             var process = Process.Start(psi);
             if (process is null)
             {
-                AnsiConsole.MarkupLine("[red]Failed to start daemon child:[/] Process.Start returned null.");
+                if (json)
+                {
+                    CliOutput.WriteJsonError("daemon_start_failed", "Failed to start daemon child: Process.Start returned null.");
+                }
+                else
+                {
+                    AnsiConsole.MarkupLine("[red]Failed to start daemon child:[/] Process.Start returned null.");
+                }
                 return 1;
             }
         }
         catch (Exception ex)
         {
-            AnsiConsole.MarkupLine($"[red]Failed to start daemon child:[/] {Markup.Escape(ex.Message ?? string.Empty)}");
+            if (json)
+            {
+                CliOutput.WriteJsonError("daemon_start_failed", ex.Message ?? string.Empty);
+            }
+            else
+            {
+                AnsiConsole.MarkupLine($"[red]Failed to start daemon child:[/] {Markup.Escape(ex.Message ?? string.Empty)}");
+            }
             return 1;
         }
 
@@ -309,12 +499,19 @@ public sealed class ServeCommand : AsyncCommand<ServeCommand.Settings>
                 var token = tokenOverride ?? IdentityFileReader.TryReadToken(identityPath);
                 if (await RunnerHealth.IsHealthyAsync(rt.BaseUrl, token, cancellationToken))
                 {
-                    AnsiConsole.Write(new Rule("[bold]codex-d http serve -d[/]").LeftJustified());
-                    AnsiConsole.MarkupLine($"Daemon URL: [cyan]{rt.BaseUrl}[/]");
-                    AnsiConsole.MarkupLine($"StateDir: [grey]{stateDir}[/]");
-                    AnsiConsole.WriteLine();
-                    AnsiConsole.MarkupLine($"Try: [grey]codex-d http exec \"Hello\"[/]");
-                    AnsiConsole.WriteLine();
+                    if (json)
+                    {
+                        CliOutput.WriteJsonLine(new { eventName = "daemon.started", baseUrl = rt.BaseUrl, stateDir });
+                    }
+                    else
+                    {
+                        AnsiConsole.Write(new Rule("[bold]codex-d http serve -d[/]").LeftJustified());
+                        AnsiConsole.MarkupLine($"Daemon URL: [cyan]{Markup.Escape(rt.BaseUrl)}[/]");
+                        AnsiConsole.MarkupLine($"StateDir: [grey]{Markup.Escape(stateDir)}[/]");
+                        AnsiConsole.WriteLine();
+                        AnsiConsole.MarkupLine($"Try: [grey]codex-d http exec \"Hello\"[/]");
+                        AnsiConsole.WriteLine();
+                    }
                     return 0;
                 }
             }
@@ -322,35 +519,62 @@ public sealed class ServeCommand : AsyncCommand<ServeCommand.Settings>
             await Task.Delay(200, cancellationToken);
         }
 
-        AnsiConsole.MarkupLine("[red]Failed to start daemon:[/] runtime file or health check did not become ready in time.");
-        AnsiConsole.MarkupLine($"Expected runtime file: [grey]{runtimePath}[/]");
+        if (json)
+        {
+            CliOutput.WriteJsonError(
+                "daemon_start_timeout",
+                "Failed to start daemon: runtime file or health check did not become ready in time.",
+                new { runtimePath });
+        }
+        else
+        {
+            AnsiConsole.MarkupLine("[red]Failed to start daemon:[/] runtime file or health check did not become ready in time.");
+            AnsiConsole.MarkupLine($"Expected runtime file: [grey]{Markup.Escape(runtimePath)}[/]");
+        }
         return 1;
     }
 
-    private static async Task<int> RunDaemonChildAsync(Settings settings, CancellationToken cancellationToken)
+    private static async Task<int> RunDaemonChildAsync(Settings settings, OutputFormat format, CancellationToken cancellationToken)
     {
+        var json = format != OutputFormat.Human;
         var isDev = BuildMode.IsDev();
 
         if (!IPAddress.TryParse(settings.Listen, out var listen) || listen is null)
         {
+            if (json)
+            {
+                CliOutput.WriteJsonError("invalid_listen", $"Invalid --listen IP: {settings.Listen}");
+            }
+            else
+            {
+                AnsiConsole.MarkupLine($"[red]Invalid --listen IP:[/] {Markup.Escape(settings.Listen)}");
+            }
             return 2;
         }
 
         var port = settings.Port ?? TryGetEnvInt("CODEX_D_DAEMON_PORT") ?? StatePaths.DEFAULT_DAEMON_PORT;
         if (port is < 0 or > 65535)
         {
+            if (json)
+            {
+                CliOutput.WriteJsonError("invalid_port", $"Invalid --port: {port}");
+            }
+            else
+            {
+                AnsiConsole.MarkupLine($"[red]Invalid --port:[/] {port}");
+            }
             return 2;
         }
 
         var stateDirRaw = string.IsNullOrWhiteSpace(settings.StateDir)
-            ? TrimOrNull(Environment.GetEnvironmentVariable("CODEX_D_DAEMON_STATE_DIR")) ?? StatePaths.GetDefaultDaemonStateDir(isDev)
+            ? StringHelpers.TrimOrNull(Environment.GetEnvironmentVariable("CODEX_D_DAEMON_STATE_DIR")) ?? StatePaths.GetDefaultDaemonStateDir(isDev)
             : settings.StateDir;
 
         var stateDir = Path.GetFullPath(stateDirRaw);
 
         var identityFile = StatePaths.IdentityFile(stateDir);
         var identityStore = new IdentityStore(identityFile);
-        var tokenOverride = TrimOrNull(settings.Token) ?? TryGetEnvTokenOverride();
+        var tokenOverride = StringHelpers.TrimOrNull(settings.Token) ?? TryGetEnvTokenOverride();
         var identity = await identityStore.LoadOrCreateAsync(tokenOverride, cancellationToken);
 
         var isLoopback = IPAddress.IsLoopback(listen);
@@ -365,7 +589,8 @@ public sealed class ServeCommand : AsyncCommand<ServeCommand.Settings>
             StateDirectory = stateDir,
             Identity = identity,
             StartedAtUtc = DateTimeOffset.UtcNow,
-            PersistRawEvents = settings.PersistRawEvents || (TryGetEnvBool("CODEX_D_PERSIST_RAW_EVENTS") ?? false)
+            PersistRawEvents = settings.PersistRawEvents || (TryGetEnvBool("CODEX_D_PERSIST_RAW_EVENTS") ?? false),
+            JsonLogs = json
         };
 
         var app = RunnerHost.Build(config);
@@ -392,7 +617,7 @@ public sealed class ServeCommand : AsyncCommand<ServeCommand.Settings>
             Pid = Environment.ProcessId,
             StartedAtUtc = config.StartedAtUtc,
             StateDir = stateDir,
-            Version = TrimOrNull(settings.DaemonVersion) ?? typeof(ServeCommand).Assembly.GetName().Version?.ToString() ?? "0.0.0"
+            Version = StringHelpers.TrimOrNull(settings.DaemonVersion) ?? typeof(ServeCommand).Assembly.GetName().Version?.ToString() ?? "0.0.0"
         };
 
         await DaemonRuntimeFile.WriteAtomicAsync(Path.Combine(stateDir, "daemon.runtime.json"), runtime, cancellationToken);
@@ -513,9 +738,9 @@ public sealed class ServeCommand : AsyncCommand<ServeCommand.Settings>
     private static void PrintBanner(ServerConfig config, bool isLoopback)
     {
         AnsiConsole.Write(new Rule("[bold]codex-d http serve[/]").LeftJustified());
-        AnsiConsole.MarkupLine($"Base URL: [cyan]{config.BaseUrl}[/]");
+        AnsiConsole.MarkupLine($"Base URL: [cyan]{Markup.Escape(config.BaseUrl)}[/]");
         AnsiConsole.MarkupLine($"RunnerId: [cyan]{config.Identity.RunnerId}[/]");
-        AnsiConsole.MarkupLine($"StateDir: [grey]{config.StateDirectory}[/]");
+        AnsiConsole.MarkupLine($"StateDir: [grey]{Markup.Escape(config.StateDirectory)}[/]");
 
         if (config.RequireAuth)
         {
@@ -526,7 +751,7 @@ public sealed class ServeCommand : AsyncCommand<ServeCommand.Settings>
             AnsiConsole.MarkupLine("Auth: [green]not required[/] on loopback (token still accepted)");
         }
 
-        AnsiConsole.MarkupLine($"Token: [yellow]{config.Identity.Token}[/]");
+        AnsiConsole.MarkupLine($"Token: [yellow]{Markup.Escape(config.Identity.Token)}[/]");
 
         if (!isLoopback)
         {
@@ -534,10 +759,10 @@ public sealed class ServeCommand : AsyncCommand<ServeCommand.Settings>
         }
 
         AnsiConsole.WriteLine();
-        AnsiConsole.MarkupLine($"Try: [grey]codex-d http exec --url {config.BaseUrl} --cd \"{Directory.GetCurrentDirectory()}\" \"Hello\"[/]");
+        AnsiConsole.MarkupLine($"Try: [grey]codex-d http exec --url {Markup.Escape(config.BaseUrl)} --cd \"{Markup.Escape(Directory.GetCurrentDirectory())}\" \"Hello\"[/]");
         if (config.RequireAuth)
         {
-            AnsiConsole.MarkupLine($"     [grey]... --token {config.Identity.Token}[/]");
+            AnsiConsole.MarkupLine($"     [grey]... --token {Markup.Escape(config.Identity.Token)}[/]");
         }
         AnsiConsole.WriteLine();
     }
@@ -567,18 +792,15 @@ public sealed class ServeCommand : AsyncCommand<ServeCommand.Settings>
         }
     }
 
-    private static string? TrimOrNull(string? value) =>
-        string.IsNullOrWhiteSpace(value) ? null : value.Trim();
-
     private static int? TryGetEnvInt(string name)
     {
-        var raw = TrimOrNull(Environment.GetEnvironmentVariable(name));
+        var raw = StringHelpers.TrimOrNull(Environment.GetEnvironmentVariable(name));
         return int.TryParse(raw, out var i) ? i : null;
     }
 
     private static bool? TryGetEnvBool(string name)
     {
-        var raw = TrimOrNull(Environment.GetEnvironmentVariable(name));
+        var raw = StringHelpers.TrimOrNull(Environment.GetEnvironmentVariable(name));
         if (raw is null)
         {
             return null;
@@ -601,7 +823,7 @@ public sealed class ServeCommand : AsyncCommand<ServeCommand.Settings>
     private static string? TryGetEnvTokenOverride()
     {
         return
-            TrimOrNull(Environment.GetEnvironmentVariable("CODEX_D_TOKEN")) ??
-            TrimOrNull(Environment.GetEnvironmentVariable("CODEX_RUNNER_TOKEN"));
+            StringHelpers.TrimOrNull(Environment.GetEnvironmentVariable("CODEX_D_TOKEN")) ??
+            StringHelpers.TrimOrNull(Environment.GetEnvironmentVariable("CODEX_RUNNER_TOKEN"));
     }
 }

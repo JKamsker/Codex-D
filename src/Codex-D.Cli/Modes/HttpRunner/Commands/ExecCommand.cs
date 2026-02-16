@@ -148,9 +148,6 @@ public sealed class ExecCommand : AsyncCommand<ExecCommand.Settings>
         return prompt;
     }
 
-    private static string? TrimOrNull(string? value) =>
-        string.IsNullOrWhiteSpace(value) ? null : value.Trim();
-
     internal static async Task<int> StreamAsync(
         RunnerClient client,
         Guid runId,
@@ -166,6 +163,55 @@ public sealed class ExecCommand : AsyncCommand<ExecCommand.Settings>
 
         await foreach (var evt in client.GetEventsAsync(runId, replay, follow, tail, cancellationToken))
         {
+            if (evt.Name == "run.completed")
+            {
+                sawCompletion = true;
+                if (TryExtractStatus(evt.Data, out var status))
+                {
+                    exitCode = status is RunStatuses.Succeeded ? 0 : 1;
+                }
+                else
+                {
+                    exitCode = 1;
+                }
+
+                if (json)
+                {
+                    using var doc = JsonDocument.Parse(evt.Data);
+                    CliOutput.WriteJsonLine(new { eventName = evt.Name, data = doc.RootElement.Clone() });
+                    continue;
+                }
+
+                if (TryExtractStatus(evt.Data, out status))
+                {
+                    Console.Out.WriteLine();
+                    AnsiConsole.MarkupLine($"[grey]Completed:[/] {status}");
+                }
+
+                continue;
+            }
+
+            if (evt.Name == "run.paused")
+            {
+                sawCompletion = true;
+                exitCode = 0;
+
+                if (json)
+                {
+                    using var doc = JsonDocument.Parse(evt.Data);
+                    CliOutput.WriteJsonLine(new { eventName = evt.Name, data = doc.RootElement.Clone() });
+                    continue;
+                }
+
+                if (TryExtractStatus(evt.Data, out var status))
+                {
+                    Console.Out.WriteLine();
+                    AnsiConsole.MarkupLine($"[grey]Paused:[/] {status}");
+                }
+
+                continue;
+            }
+
             if (json)
             {
                 using var doc = JsonDocument.Parse(evt.Data);
@@ -211,39 +257,6 @@ public sealed class ExecCommand : AsyncCommand<ExecCommand.Settings>
                 continue;
             }
 
-            if (evt.Name == "run.completed")
-            {
-                sawCompletion = true;
-                if (TryExtractStatus(evt.Data, out var status))
-                {
-                    Console.Out.WriteLine();
-                    AnsiConsole.MarkupLine($"[grey]Completed:[/] {status}");
-                    exitCode = status is RunStatuses.Succeeded ? 0 : 1;
-                }
-                else
-                {
-                    exitCode = 1;
-                }
-
-                continue;
-            }
-
-            if (evt.Name == "run.paused")
-            {
-                sawCompletion = true;
-                if (TryExtractStatus(evt.Data, out var status))
-                {
-                    Console.Out.WriteLine();
-                    AnsiConsole.MarkupLine($"[grey]Paused:[/] {status}");
-                    exitCode = 0;
-                }
-                else
-                {
-                    exitCode = 0;
-                }
-
-                continue;
-            }
         }
 
         if (format == OutputFormat.Human)

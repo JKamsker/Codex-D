@@ -45,13 +45,16 @@ public sealed class RunManager
         var kind = RunKinds.Normalize(request.Kind);
 
         var created = await _store.CreateAsync(
-            cwd: cwd,
-            kind: kind,
-            review: request.Review,
-            model: string.IsNullOrWhiteSpace(request.Model) ? null : request.Model.Trim(),
-            effort: string.IsNullOrWhiteSpace(request.Effort) ? null : request.Effort.Trim(),
-            sandbox: string.IsNullOrWhiteSpace(request.Sandbox) ? null : request.Sandbox.Trim(),
-            approvalPolicy: string.IsNullOrWhiteSpace(request.ApprovalPolicy) ? null : request.ApprovalPolicy.Trim(),
+            new RunCreateOptions
+            {
+                Cwd = cwd,
+                Kind = kind,
+                Review = request.Review,
+                Model = string.IsNullOrWhiteSpace(request.Model) ? null : request.Model.Trim(),
+                Effort = string.IsNullOrWhiteSpace(request.Effort) ? null : request.Effort.Trim(),
+                Sandbox = string.IsNullOrWhiteSpace(request.Sandbox) ? null : request.Sandbox.Trim(),
+                ApprovalPolicy = string.IsNullOrWhiteSpace(request.ApprovalPolicy) ? null : request.ApprovalPolicy.Trim()
+            },
             ct);
 
         var record = created.Run;

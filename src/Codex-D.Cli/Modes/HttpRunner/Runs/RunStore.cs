@@ -4,6 +4,17 @@ using CodexD.HttpRunner.State;
 
 namespace CodexD.HttpRunner.Runs;
 
+public sealed class RunCreateOptions
+{
+    public required string Cwd { get; init; }
+    public string? Kind { get; init; }
+    public RunReviewRequest? Review { get; init; }
+    public string? Model { get; init; }
+    public string? Effort { get; init; }
+    public string? Sandbox { get; init; }
+    public string? ApprovalPolicy { get; init; }
+}
+
 public sealed class RunStore
 {
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
@@ -30,7 +41,8 @@ public sealed class RunStore
     public string StateDirectory => _stateDirectory;
     public bool PersistRawEvents => _persistRawEvents;
 
-    public async Task<RunStoreCreateResult> CreateAsync(
+    [Obsolete("Use CreateAsync(RunCreateOptions, CancellationToken).")]
+    public Task<RunStoreCreateResult> CreateAsync(
         string cwd,
         string? kind,
         RunReviewRequest? review,
@@ -40,7 +52,24 @@ public sealed class RunStore
         string? approvalPolicy,
         CancellationToken ct)
     {
-        ArgumentException.ThrowIfNullOrWhiteSpace(cwd);
+        return CreateAsync(
+            new RunCreateOptions
+            {
+                Cwd = cwd,
+                Kind = kind,
+                Review = review,
+                Model = model,
+                Effort = effort,
+                Sandbox = sandbox,
+                ApprovalPolicy = approvalPolicy
+            },
+            ct);
+    }
+
+    public async Task<RunStoreCreateResult> CreateAsync(RunCreateOptions options, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(options);
+        ArgumentException.ThrowIfNullOrWhiteSpace(options.Cwd);
 
         var now = DateTimeOffset.UtcNow;
         var runId = Guid.NewGuid();
@@ -52,18 +81,18 @@ public sealed class RunStore
         {
             RunId = runId,
             CreatedAt = now,
-            Cwd = cwd,
+            Cwd = options.Cwd,
             Status = RunStatuses.Queued,
             StartedAt = null,
             CompletedAt = null,
             CodexThreadId = null,
             CodexTurnId = null,
-            Kind = kind,
-            Review = review,
-            Model = model,
-            Effort = effort,
-            Sandbox = sandbox,
-            ApprovalPolicy = approvalPolicy,
+            Kind = options.Kind,
+            Review = options.Review,
+            Model = options.Model,
+            Effort = options.Effort,
+            Sandbox = options.Sandbox,
+            ApprovalPolicy = options.ApprovalPolicy,
             Error = null
         };
 
@@ -73,7 +102,7 @@ public sealed class RunStore
             Directory.CreateDirectory(_runsRoot);
 
             var relativeDir = Path.GetRelativePath(_runsRoot, runDirectory);
-            var indexEntry = new RunIndexEntry { RunId = runId, CreatedAt = now, Cwd = cwd, RelativeDir = relativeDir };
+            var indexEntry = new RunIndexEntry { RunId = runId, CreatedAt = now, Cwd = options.Cwd, RelativeDir = relativeDir };
             await AppendLineAsync(_indexFile, JsonSerializer.Serialize(indexEntry, Json), ct);
 
             await WriteRunRecordAsync(runDirectory, record, ct);

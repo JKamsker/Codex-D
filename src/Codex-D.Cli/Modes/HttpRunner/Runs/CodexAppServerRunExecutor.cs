@@ -132,7 +132,7 @@ public sealed class CodexAppServerRunExecutor : IRunExecutor
             return null;
         }
 
-        return CodexReasoningEffort.Parse(raw);
+        return CodexReasoningEffort.TryParse(raw, out var effort) ? effort : (CodexReasoningEffort?)null;
     }
 
     private RunExecutionResult MapCompletion(TurnCompletedNotification completed)

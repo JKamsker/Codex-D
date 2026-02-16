@@ -2,6 +2,7 @@ using System.ComponentModel;
 using CodexD.HttpRunner.Client;
 using CodexD.HttpRunner.Contracts;
 using CodexD.Shared.Output;
+using CodexD.Shared.Strings;
 using Spectre.Console;
 using Spectre.Console.Cli;
 
@@ -131,8 +132,8 @@ public sealed class ReviewCommand : AsyncCommand<ReviewCommand.Settings>
                 throw new ArgumentException("Invalid --mode. Use 'exec' or 'appserver'.");
             }
 
-            var baseBranch = TrimOrNull(settings.BaseBranch);
-            var commitSha = TrimOrNull(settings.CommitSha);
+            var baseBranch = StringHelpers.TrimOrNull(settings.BaseBranch);
+            var commitSha = StringHelpers.TrimOrNull(settings.CommitSha);
             var uncommitted = settings.Uncommitted;
 
             var targets = 0;
@@ -166,11 +167,11 @@ public sealed class ReviewCommand : AsyncCommand<ReviewCommand.Settings>
             var review = new RunReviewRequest
             {
                 Mode = mode,
-                Delivery = TrimOrNull(settings.Delivery),
+                Delivery = StringHelpers.TrimOrNull(settings.Delivery),
                 Uncommitted = uncommitted,
                 BaseBranch = baseBranch,
                 CommitSha = commitSha,
-                Title = TrimOrNull(settings.Title),
+                Title = StringHelpers.TrimOrNull(settings.Title),
                 AdditionalOptions = string.Equals(mode, "appserver", StringComparison.OrdinalIgnoreCase)
                     ? []
                     : BuildAdditionalOptions(settings)
@@ -182,8 +183,8 @@ public sealed class ReviewCommand : AsyncCommand<ReviewCommand.Settings>
                 Prompt = prompt,
                 Kind = RunKinds.Review,
                 Review = review,
-                Model = TrimOrNull(settings.Model),
-                Effort = TrimOrNull(settings.Effort),
+                Model = StringHelpers.TrimOrNull(settings.Model),
+                Effort = StringHelpers.TrimOrNull(settings.Effort),
                 ApprovalPolicy = string.IsNullOrWhiteSpace(settings.ApprovalPolicy) ? "never" : settings.ApprovalPolicy.Trim()
             };
 
@@ -253,25 +254,25 @@ public sealed class ReviewCommand : AsyncCommand<ReviewCommand.Settings>
             args.Add(settings.Model.Trim());
         }
 
-        foreach (var cfg in settings.Config.Select(TrimOrNull).Where(x => x is not null))
+        foreach (var cfg in settings.Config.Select(StringHelpers.TrimOrNull).Where(x => x is not null))
         {
             args.Add("--config");
             args.Add(cfg!);
         }
 
-        foreach (var feat in settings.Enable.Select(TrimOrNull).Where(x => x is not null))
+        foreach (var feat in settings.Enable.Select(StringHelpers.TrimOrNull).Where(x => x is not null))
         {
             args.Add("--enable");
             args.Add(feat!);
         }
 
-        foreach (var feat in settings.Disable.Select(TrimOrNull).Where(x => x is not null))
+        foreach (var feat in settings.Disable.Select(StringHelpers.TrimOrNull).Where(x => x is not null))
         {
             args.Add("--disable");
             args.Add(feat!);
         }
 
-        foreach (var raw in settings.Arg.Select(TrimOrNull).Where(x => x is not null))
+        foreach (var raw in settings.Arg.Select(StringHelpers.TrimOrNull).Where(x => x is not null))
         {
             args.Add(raw!);
         }
@@ -279,6 +280,4 @@ public sealed class ReviewCommand : AsyncCommand<ReviewCommand.Settings>
         return args.ToArray();
     }
 
-    private static string? TrimOrNull(string? value) =>
-        string.IsNullOrWhiteSpace(value) ? null : value.Trim();
 }

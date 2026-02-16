@@ -79,18 +79,23 @@ public sealed class ReasoningEffortSwitchTests
     {
         using var cts = new CancellationTokenSource(timeout);
 
-        while (!cts.IsCancellationRequested)
+        try
         {
-            var run = await sdk.GetRunAsync(runId, cts.Token);
-            if (string.Equals(run.Status, status, StringComparison.Ordinal))
+            while (!cts.IsCancellationRequested)
             {
-                return;
+                var run = await sdk.GetRunAsync(runId, cts.Token);
+                if (string.Equals(run.Status, status, StringComparison.Ordinal))
+                {
+                    return;
+                }
+
+                await Task.Delay(50, cts.Token);
             }
-
-            await Task.Delay(50, cts.Token);
         }
-
-        throw new TimeoutException($"Timed out waiting for run {runId:D} to reach status '{status}'.");
+        catch (OperationCanceledException) when (cts.IsCancellationRequested)
+        {
+            throw new TimeoutException($"Timed out waiting for run {runId:D} to reach status '{status}'.");
+        }
     }
 
     private sealed class CaptureEffortExecutor : IRunExecutor

@@ -7,6 +7,7 @@ using CodexD.HttpRunner.Daemon;
 using CodexD.HttpRunner.Server;
 using CodexD.HttpRunner.State;
 using CodexD.Shared.Output;
+using CodexD.Shared.Strings;
 using Microsoft.Extensions.Hosting;
 using Spectre.Console;
 using Spectre.Console.Cli;
@@ -148,7 +149,7 @@ public sealed class ServeCommand : AsyncCommand<ServeCommand.Settings>
         }
 
         var stateDirRaw = string.IsNullOrWhiteSpace(settings.StateDir)
-            ? TrimOrNull(Environment.GetEnvironmentVariable("CODEX_D_FOREGROUND_STATE_DIR")) ??
+            ? StringHelpers.TrimOrNull(Environment.GetEnvironmentVariable("CODEX_D_FOREGROUND_STATE_DIR")) ??
               StatePaths.GetForegroundStateDir(Directory.GetCurrentDirectory())
             : settings.StateDir;
 
@@ -156,7 +157,7 @@ public sealed class ServeCommand : AsyncCommand<ServeCommand.Settings>
 
         var identityFile = StatePaths.IdentityFile(stateDir);
         var identityStore = new IdentityStore(identityFile);
-        var tokenOverride = TrimOrNull(settings.Token) ?? TryGetEnvTokenOverride();
+        var tokenOverride = StringHelpers.TrimOrNull(settings.Token) ?? TryGetEnvTokenOverride();
         var identity = await identityStore.LoadOrCreateAsync(tokenOverride, cancellationToken);
 
         var isLoopback = IPAddress.IsLoopback(listen);
@@ -235,7 +236,7 @@ public sealed class ServeCommand : AsyncCommand<ServeCommand.Settings>
         }
 
         var stateDirRaw = string.IsNullOrWhiteSpace(settings.StateDir)
-            ? TrimOrNull(Environment.GetEnvironmentVariable("CODEX_D_DAEMON_STATE_DIR")) ?? StatePaths.GetDefaultDaemonStateDir(isDev)
+            ? StringHelpers.TrimOrNull(Environment.GetEnvironmentVariable("CODEX_D_DAEMON_STATE_DIR")) ?? StatePaths.GetDefaultDaemonStateDir(isDev)
             : settings.StateDir;
 
         var stateDir = Path.GetFullPath(stateDirRaw);
@@ -248,7 +249,7 @@ public sealed class ServeCommand : AsyncCommand<ServeCommand.Settings>
 
         var desiredVersion = await GetDesiredDaemonVersionAsync(isDev, cancellationToken);
         var installedVersion = TryReadMarker(Path.Combine(daemonBinDir, ".version"));
-        var tokenOverride = TrimOrNull(settings.Token) ?? TryGetEnvTokenOverride();
+        var tokenOverride = StringHelpers.TrimOrNull(settings.Token) ?? TryGetEnvTokenOverride();
 
         if (settings.Force || isDev || !string.Equals(installedVersion, desiredVersion, StringComparison.Ordinal))
         {
@@ -566,14 +567,14 @@ public sealed class ServeCommand : AsyncCommand<ServeCommand.Settings>
         }
 
         var stateDirRaw = string.IsNullOrWhiteSpace(settings.StateDir)
-            ? TrimOrNull(Environment.GetEnvironmentVariable("CODEX_D_DAEMON_STATE_DIR")) ?? StatePaths.GetDefaultDaemonStateDir(isDev)
+            ? StringHelpers.TrimOrNull(Environment.GetEnvironmentVariable("CODEX_D_DAEMON_STATE_DIR")) ?? StatePaths.GetDefaultDaemonStateDir(isDev)
             : settings.StateDir;
 
         var stateDir = Path.GetFullPath(stateDirRaw);
 
         var identityFile = StatePaths.IdentityFile(stateDir);
         var identityStore = new IdentityStore(identityFile);
-        var tokenOverride = TrimOrNull(settings.Token) ?? TryGetEnvTokenOverride();
+        var tokenOverride = StringHelpers.TrimOrNull(settings.Token) ?? TryGetEnvTokenOverride();
         var identity = await identityStore.LoadOrCreateAsync(tokenOverride, cancellationToken);
 
         var isLoopback = IPAddress.IsLoopback(listen);
@@ -616,7 +617,7 @@ public sealed class ServeCommand : AsyncCommand<ServeCommand.Settings>
             Pid = Environment.ProcessId,
             StartedAtUtc = config.StartedAtUtc,
             StateDir = stateDir,
-            Version = TrimOrNull(settings.DaemonVersion) ?? typeof(ServeCommand).Assembly.GetName().Version?.ToString() ?? "0.0.0"
+            Version = StringHelpers.TrimOrNull(settings.DaemonVersion) ?? typeof(ServeCommand).Assembly.GetName().Version?.ToString() ?? "0.0.0"
         };
 
         await DaemonRuntimeFile.WriteAtomicAsync(Path.Combine(stateDir, "daemon.runtime.json"), runtime, cancellationToken);
@@ -791,18 +792,15 @@ public sealed class ServeCommand : AsyncCommand<ServeCommand.Settings>
         }
     }
 
-    private static string? TrimOrNull(string? value) =>
-        string.IsNullOrWhiteSpace(value) ? null : value.Trim();
-
     private static int? TryGetEnvInt(string name)
     {
-        var raw = TrimOrNull(Environment.GetEnvironmentVariable(name));
+        var raw = StringHelpers.TrimOrNull(Environment.GetEnvironmentVariable(name));
         return int.TryParse(raw, out var i) ? i : null;
     }
 
     private static bool? TryGetEnvBool(string name)
     {
-        var raw = TrimOrNull(Environment.GetEnvironmentVariable(name));
+        var raw = StringHelpers.TrimOrNull(Environment.GetEnvironmentVariable(name));
         if (raw is null)
         {
             return null;
@@ -825,7 +823,7 @@ public sealed class ServeCommand : AsyncCommand<ServeCommand.Settings>
     private static string? TryGetEnvTokenOverride()
     {
         return
-            TrimOrNull(Environment.GetEnvironmentVariable("CODEX_D_TOKEN")) ??
-            TrimOrNull(Environment.GetEnvironmentVariable("CODEX_RUNNER_TOKEN"));
+            StringHelpers.TrimOrNull(Environment.GetEnvironmentVariable("CODEX_D_TOKEN")) ??
+            StringHelpers.TrimOrNull(Environment.GetEnvironmentVariable("CODEX_RUNNER_TOKEN"));
     }
 }

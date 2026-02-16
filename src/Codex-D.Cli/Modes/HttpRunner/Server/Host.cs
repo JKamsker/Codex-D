@@ -386,29 +386,14 @@ public static class Host
             if (hasRawEvents)
             {
                 var queue = new Queue<object>(Math.Min(count, 50));
-                DateTimeOffset? maxNotificationAt = null;
-
                 var events = await store.ReadRawEventsAsync(runId, tailEvents, ct);
-                foreach (var env in events)
+                var maxNotificationAt = events.Where(e => string.Equals(e.Type, "codex.notification", StringComparison.Ordinal))
+                    .Select(e => (DateTimeOffset?)e.CreatedAt)
+                    .Max();
+
+                foreach (var (createdAt, text) in ExtractCompletedMessages(events))
                 {
-                    if (!string.Equals(env.Type, "codex.notification", StringComparison.Ordinal))
-                    {
-                        continue;
-                    }
-
-                    maxNotificationAt = maxNotificationAt is null || env.CreatedAt > maxNotificationAt.Value ? env.CreatedAt : maxNotificationAt;
-                    if (!RunEventDataExtractors.TryGetCompletedAgentMessageText(env.Data, out var text) ||
-                        string.IsNullOrWhiteSpace(text))
-                    {
-                        continue;
-                    }
-
-                    if (queue.Count == count)
-                    {
-                        queue.Dequeue();
-                    }
-
-                    queue.Enqueue(new { createdAt = env.CreatedAt, text });
+                    EnqueueCompletedMessage(queue, count, createdAt, text);
                 }
 
                 var snapshot = backlog.SnapshotAfter(runId, maxNotificationAt);
@@ -417,25 +402,9 @@ public static class Host
                     snapshot = snapshot.Skip(snapshot.Count - tailEvents).ToArray();
                 }
 
-                foreach (var env in snapshot)
+                foreach (var (createdAt, text) in ExtractCompletedMessages(snapshot))
                 {
-                    if (!string.Equals(env.Type, "codex.notification", StringComparison.Ordinal))
-                    {
-                        continue;
-                    }
-
-                    if (!RunEventDataExtractors.TryGetCompletedAgentMessageText(env.Data, out var text) ||
-                        string.IsNullOrWhiteSpace(text))
-                    {
-                        continue;
-                    }
-
-                    if (queue.Count == count)
-                    {
-                        queue.Dequeue();
-                    }
-
-                    queue.Enqueue(new { createdAt = env.CreatedAt, text });
+                    EnqueueCompletedMessage(queue, count, createdAt, text);
                 }
 
                 return Results.Ok(new { items = queue.ToArray() });
@@ -460,20 +429,9 @@ public static class Host
             }
 
             var pending = new List<(DateTimeOffset CreatedAt, string Text)>();
-            foreach (var env in snapshotPending)
+            foreach (var (createdAt, text) in ExtractCompletedMessages(snapshotPending))
             {
-                if (!string.Equals(env.Type, "codex.notification", StringComparison.Ordinal))
-                {
-                    continue;
-                }
-
-                if (!RunEventDataExtractors.TryGetCompletedAgentMessageText(env.Data, out var text) ||
-                    string.IsNullOrWhiteSpace(text))
-                {
-                    continue;
-                }
-
-                pending.Add((env.CreatedAt, text));
+                pending.Add((createdAt, text));
             }
 
             var overlap = FindMessageOverlap(history, pending);
@@ -851,6 +809,35 @@ public static class Host
         }
 
         return 0;
+    }
+
+    private static IEnumerable<(DateTimeOffset CreatedAt, string Text)> ExtractCompletedMessages(IEnumerable<RunEventEnvelope> events)
+    {
+        foreach (var env in events)
+        {
+            if (!string.Equals(env.Type, "codex.notification", StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            if (!RunEventDataExtractors.TryGetCompletedAgentMessageText(env.Data, out var text) ||
+                string.IsNullOrWhiteSpace(text))
+            {
+                continue;
+            }
+
+            yield return (env.CreatedAt, text);
+        }
+    }
+
+    private static void EnqueueCompletedMessage(Queue<object> queue, int maxCount, DateTimeOffset createdAt, string text)
+    {
+        if (queue.Count == maxCount)
+        {
+            queue.Dequeue();
+        }
+
+        queue.Enqueue(new { createdAt, text });
     }
 
     private static bool HasRawEventsFile(string runDirectory) =>

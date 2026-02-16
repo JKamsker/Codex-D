@@ -383,14 +383,10 @@ public sealed class ServeCommand : AsyncCommand<ServeCommand.Settings>
             args.Add("--persist-raw-events");
         }
 
-        if (settings.Json)
-        {
-            args.Add("--json");
-        }
-        else if (!string.IsNullOrWhiteSpace(settings.OutputFormat))
+        if (format != OutputFormat.Human)
         {
             args.Add("--outputformat");
-            args.Add(settings.OutputFormat.Trim());
+            args.Add(format == OutputFormat.Json ? "json" : "jsonl");
         }
 
         try

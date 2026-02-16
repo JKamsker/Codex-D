@@ -3,6 +3,7 @@ using System.Text.Json;
 using CodexD.HttpRunner.Client;
 using CodexD.HttpRunner.Daemon;
 using CodexD.HttpRunner.State;
+using CodexD.Shared.Output;
 using CodexD.Shared.Paths;
 using Spectre.Console;
 using Spectre.Console.Cli;
@@ -20,6 +21,23 @@ public sealed class StatusCommand : AsyncCommand<StatusCommand.Settings>
 
     public override async Task<int> ExecuteAsync(CommandContext context, Settings settings, CancellationToken cancellationToken)
     {
+        OutputFormat format;
+        try
+        {
+            format = settings.ResolveOutputFormat(OutputFormatUsage.Single);
+        }
+        catch (ArgumentException ex)
+        {
+            if (settings.Json)
+            {
+                CliOutput.WriteJsonError("invalid_outputformat", ex.Message);
+                return 2;
+            }
+
+            Console.Error.WriteLine(ex.Message);
+            return 2;
+        }
+
         var isDev = BuildMode.IsDev();
 
         var cwd = string.IsNullOrWhiteSpace(settings.Cd) ? Directory.GetCurrentDirectory() : settings.Cd!;
@@ -42,7 +60,7 @@ public sealed class StatusCommand : AsyncCommand<StatusCommand.Settings>
             var health = await RunnerHealth.CheckAsync(explicitUrl, explicitToken, cancellationToken);
             probes.Add(new { kind = "explicit", baseUrl = explicitUrl, health = health.ToString().ToLowerInvariant() });
 
-            if (settings.Json)
+            if (format != OutputFormat.Human)
             {
                 await WriteStatusJsonAsync(explicitUrl, explicitToken, probes, cancellationToken);
                 return health == RunnerHealthStatus.Ok ? 0 : 1;
@@ -120,7 +138,7 @@ public sealed class StatusCommand : AsyncCommand<StatusCommand.Settings>
         var resolvedToken = daemonAttempt == "ok" ? daemonToken : fgAttempt == "ok" ? fgToken : null;
         var resolvedSource = daemonAttempt == "ok" ? "daemon" : fgAttempt == "ok" ? "foreground" : null;
 
-        if (settings.Json)
+        if (format != OutputFormat.Human)
         {
             var payload = new
             {
@@ -129,7 +147,7 @@ public sealed class StatusCommand : AsyncCommand<StatusCommand.Settings>
                 probes
             };
 
-            Console.Out.WriteLine(JsonSerializer.Serialize(payload, new JsonSerializerOptions(JsonSerializerDefaults.Web)));
+            CliOutput.WriteJsonLine(payload);
             return resolvedBaseUrl is null ? 1 : 0;
         }
 
@@ -153,11 +171,11 @@ public sealed class StatusCommand : AsyncCommand<StatusCommand.Settings>
         {
             var health = await client.GetHealthAsync(ct);
             var info = await client.GetInfoAsync(ct);
-            Console.Out.WriteLine(JsonSerializer.Serialize(new { payload.resolved, payload.probes, health, info }, new JsonSerializerOptions(JsonSerializerDefaults.Web)));
+            CliOutput.WriteJsonLine(new { payload.resolved, payload.probes, health, info });
         }
         catch
         {
-            Console.Out.WriteLine(JsonSerializer.Serialize(payload, new JsonSerializerOptions(JsonSerializerDefaults.Web)));
+            CliOutput.WriteJsonLine(payload);
         }
     }
 

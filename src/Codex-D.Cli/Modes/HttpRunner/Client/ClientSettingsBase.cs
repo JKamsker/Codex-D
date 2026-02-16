@@ -1,6 +1,7 @@
 using System.ComponentModel;
 using CodexD.HttpRunner.Daemon;
 using CodexD.HttpRunner.State;
+using CodexD.Shared.Output;
 using CodexD.Shared.Paths;
 using Spectre.Console.Cli;
 
@@ -20,9 +21,16 @@ public abstract class ClientSettingsBase : CommandSettings
     [Description("Working directory (exact-match filtering for ls/--last). Default: current directory")]
     public string? Cd { get; init; }
 
+    [CommandOption("--output-format|--outputformat <FORMAT>")]
+    [Description("Output format: human, json, or jsonl. Default: human. For streaming commands, 'json' behaves like 'jsonl'.")]
+    public string? OutputFormat { get; init; }
+
     [CommandOption("--json")]
-    [Description("Print JSONL events (client-side envelope) instead of human-friendly output.")]
+    [Description("Deprecated. Use --outputformat json/jsonl. For streaming commands this outputs JSONL events (client-side envelope).")]
     public bool Json { get; init; }
+
+    public OutputFormat ResolveOutputFormat(OutputFormatUsage usage) =>
+        OutputFormatParser.Resolve(OutputFormat, Json, usage);
 
     public async Task<ResolvedClientSettings> ResolveAsync(CancellationToken ct)
     {

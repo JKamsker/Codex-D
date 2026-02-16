@@ -2,6 +2,7 @@ using System.ComponentModel;
 using System.Text.Json;
 using CodexD.HttpRunner.Client;
 using CodexD.HttpRunner.Contracts;
+using CodexD.Shared.Output;
 using Spectre.Console;
 using Spectre.Console.Cli;
 
@@ -35,6 +36,23 @@ public sealed class ExecCommand : AsyncCommand<ExecCommand.Settings>
 
     public override async Task<int> ExecuteAsync(CommandContext context, Settings settings, CancellationToken cancellationToken)
     {
+        OutputFormat format;
+        try
+        {
+            format = settings.ResolveOutputFormat(OutputFormatUsage.Streaming);
+        }
+        catch (ArgumentException ex)
+        {
+            if (settings.Json)
+            {
+                CliOutput.WriteJsonError("invalid_outputformat", ex.Message);
+                return 2;
+            }
+
+            Console.Error.WriteLine(ex.Message);
+            return 2;
+        }
+
         ResolvedClientSettings resolved;
         try
         {
@@ -58,9 +76,9 @@ public sealed class ExecCommand : AsyncCommand<ExecCommand.Settings>
             var runId = created.RunId;
             var status = created.Status;
 
-            if (settings.Json)
+            if (format != OutputFormat.Human)
             {
-                WriteJsonLine(new { eventName = "run.created", runId, status });
+                CliOutput.WriteJsonLine(new { eventName = "run.created", runId, status });
             }
             else
             {
@@ -72,10 +90,16 @@ public sealed class ExecCommand : AsyncCommand<ExecCommand.Settings>
                 return 0;
             }
 
-            return await StreamAsync(client, runId, replay: true, follow: true, tail: null, json: settings.Json, cancellationToken);
+            return await StreamAsync(client, runId, replay: true, follow: true, tail: null, json: format != OutputFormat.Human, cancellationToken);
         }
         catch (ArgumentException ex)
         {
+            if (format != OutputFormat.Human)
+            {
+                CliOutput.WriteJsonError("invalid_request", ex.Message);
+                return 2;
+            }
+
             Console.Error.WriteLine(ex.Message);
             return 1;
         }
@@ -132,7 +156,7 @@ public sealed class ExecCommand : AsyncCommand<ExecCommand.Settings>
             if (json)
             {
                 using var doc = JsonDocument.Parse(evt.Data);
-                WriteJsonLine(new { eventName = evt.Name, data = doc.RootElement.Clone() });
+                CliOutput.WriteJsonLine(new { eventName = evt.Name, data = doc.RootElement.Clone() });
                 continue;
             }
 
@@ -219,6 +243,10 @@ public sealed class ExecCommand : AsyncCommand<ExecCommand.Settings>
             if (!json)
             {
                 Console.Error.WriteLine("Event stream ended before run.completed was received.");
+            }
+            else
+            {
+                CliOutput.WriteJsonError("stream_ended", "Event stream ended before run.completed was received.");
             }
             return 1;
         }
@@ -351,9 +379,4 @@ public sealed class ExecCommand : AsyncCommand<ExecCommand.Settings>
         }
     }
 
-    private static void WriteJsonLine(object value)
-    {
-        var json = JsonSerializer.Serialize(value, new JsonSerializerOptions(JsonSerializerDefaults.Web));
-        Console.Out.WriteLine(json);
-    }
 }

@@ -1,5 +1,6 @@
 using System.ComponentModel;
 using CodexD.HttpRunner.Client;
+using CodexD.Shared.Output;
 using Spectre.Console;
 using Spectre.Console.Cli;
 
@@ -31,6 +32,23 @@ public sealed class AttachCommand : AsyncCommand<AttachCommand.Settings>
 
     public override async Task<int> ExecuteAsync(CommandContext context, Settings settings, CancellationToken cancellationToken)
     {
+        OutputFormat format;
+        try
+        {
+            format = settings.ResolveOutputFormat(OutputFormatUsage.Streaming);
+        }
+        catch (ArgumentException ex)
+        {
+            if (settings.Json)
+            {
+                CliOutput.WriteJsonError("invalid_outputformat", ex.Message);
+                return 2;
+            }
+
+            Console.Error.WriteLine(ex.Message);
+            return 2;
+        }
+
         ResolvedClientSettings resolved;
         try
         {
@@ -38,7 +56,14 @@ public sealed class AttachCommand : AsyncCommand<AttachCommand.Settings>
         }
         catch (RunnerResolutionFailure ex)
         {
-            Console.Error.WriteLine(ex.UserMessage);
+            if (format != OutputFormat.Human)
+            {
+                CliOutput.WriteJsonError("runner_not_found", ex.UserMessage);
+            }
+            else
+            {
+                Console.Error.WriteLine(ex.UserMessage);
+            }
             return 1;
         }
         using var client = new RunnerClient(resolved.BaseUrl, resolved.Token);
@@ -50,7 +75,14 @@ public sealed class AttachCommand : AsyncCommand<AttachCommand.Settings>
             var latest = runs.OrderByDescending(x => x.CreatedAt).FirstOrDefault();
             if (latest is null)
             {
-                AnsiConsole.MarkupLine("[red]No runs found for this directory.[/]");
+                if (format != OutputFormat.Human)
+                {
+                    CliOutput.WriteJsonError("no_runs", "No runs found for this directory.");
+                }
+                else
+                {
+                    AnsiConsole.MarkupLine("[red]No runs found for this directory.[/]");
+                }
                 return 1;
             }
 
@@ -60,7 +92,14 @@ public sealed class AttachCommand : AsyncCommand<AttachCommand.Settings>
         {
             if (string.IsNullOrWhiteSpace(settings.RunId) || !Guid.TryParse(settings.RunId, out runId))
             {
-                AnsiConsole.MarkupLine("[red]Missing or invalid RUN_ID.[/]");
+                if (format != OutputFormat.Human)
+                {
+                    CliOutput.WriteJsonError("invalid_run_id", "Missing or invalid RUN_ID.");
+                }
+                else
+                {
+                    AnsiConsole.MarkupLine("[red]Missing or invalid RUN_ID.[/]");
+                }
                 return 2;
             }
         }
@@ -71,21 +110,36 @@ public sealed class AttachCommand : AsyncCommand<AttachCommand.Settings>
 
         if (settings.FollowOnly && settings.Tail is not null)
         {
-            AnsiConsole.MarkupLine("[red]--follow-only conflicts with --tail.[/]");
+            if (format != OutputFormat.Human)
+            {
+                CliOutput.WriteJsonError("invalid_args", "--follow-only conflicts with --tail.");
+            }
+            else
+            {
+                AnsiConsole.MarkupLine("[red]--follow-only conflicts with --tail.[/]");
+            }
             return 2;
         }
 
         if (settings.NoFollow && settings.FollowOnly)
         {
-            AnsiConsole.MarkupLine("[red]--no-follow conflicts with --follow-only.[/]");
+            if (format != OutputFormat.Human)
+            {
+                CliOutput.WriteJsonError("invalid_args", "--no-follow conflicts with --follow-only.");
+            }
+            else
+            {
+                AnsiConsole.MarkupLine("[red]--no-follow conflicts with --follow-only.[/]");
+            }
             return 2;
         }
 
-        if (!settings.Json)
+        var json = format != OutputFormat.Human;
+        if (!json)
         {
             AnsiConsole.MarkupLine($"Attaching to [cyan]{runId:D}[/]...");
         }
 
-        return await ExecCommand.StreamAsync(client, runId, replay, follow, tail, settings.Json, cancellationToken);
+        return await ExecCommand.StreamAsync(client, runId, replay, follow, tail, json, cancellationToken);
     }
 }

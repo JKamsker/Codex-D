@@ -1,7 +1,7 @@
 using System.ComponentModel;
-using System.Text.Json;
 using CodexD.HttpRunner.Client;
 using CodexD.HttpRunner.Commands;
+using CodexD.Shared.Output;
 using Spectre.Console;
 using Spectre.Console.Cli;
 
@@ -38,6 +38,23 @@ public sealed class ResumeCommand : AsyncCommand<ResumeCommand.Settings>
 
     public override async Task<int> ExecuteAsync(CommandContext context, Settings settings, CancellationToken cancellationToken)
     {
+        OutputFormat format;
+        try
+        {
+            format = settings.ResolveOutputFormat(OutputFormatUsage.Streaming);
+        }
+        catch (ArgumentException ex)
+        {
+            if (settings.Json)
+            {
+                CliOutput.WriteJsonError("invalid_outputformat", ex.Message);
+                return 2;
+            }
+
+            Console.Error.WriteLine(ex.Message);
+            return 2;
+        }
+
         ResolvedClientSettings resolved;
         try
         {
@@ -45,25 +62,53 @@ public sealed class ResumeCommand : AsyncCommand<ResumeCommand.Settings>
         }
         catch (RunnerResolutionFailure ex)
         {
-            Console.Error.WriteLine(ex.UserMessage);
+            if (format != OutputFormat.Human)
+            {
+                CliOutput.WriteJsonError("runner_not_found", ex.UserMessage);
+            }
+            else
+            {
+                Console.Error.WriteLine(ex.UserMessage);
+            }
             return 1;
         }
 
         if (string.IsNullOrWhiteSpace(settings.RunId) || !Guid.TryParse(settings.RunId, out var runId))
         {
-            AnsiConsole.MarkupLine("[red]Missing or invalid RUN_ID.[/]");
+            if (format != OutputFormat.Human)
+            {
+                CliOutput.WriteJsonError("invalid_run_id", "Missing or invalid RUN_ID.");
+            }
+            else
+            {
+                AnsiConsole.MarkupLine("[red]Missing or invalid RUN_ID.[/]");
+            }
             return 2;
         }
 
         if (settings.FollowOnly && settings.Tail is not null)
         {
-            AnsiConsole.MarkupLine("[red]--follow-only conflicts with --tail.[/]");
+            if (format != OutputFormat.Human)
+            {
+                CliOutput.WriteJsonError("invalid_args", "--follow-only conflicts with --tail.");
+            }
+            else
+            {
+                AnsiConsole.MarkupLine("[red]--follow-only conflicts with --tail.[/]");
+            }
             return 2;
         }
 
         if (settings.NoFollow && settings.FollowOnly)
         {
-            AnsiConsole.MarkupLine("[red]--no-follow conflicts with --follow-only.[/]");
+            if (format != OutputFormat.Human)
+            {
+                CliOutput.WriteJsonError("invalid_args", "--no-follow conflicts with --follow-only.");
+            }
+            else
+            {
+                AnsiConsole.MarkupLine("[red]--no-follow conflicts with --follow-only.[/]");
+            }
             return 2;
         }
 
@@ -78,18 +123,26 @@ public sealed class ResumeCommand : AsyncCommand<ResumeCommand.Settings>
         try
         {
             var resumed = await client.ResumeAsync(runId, prompt, cancellationToken);
-            if (!settings.Json)
+            var json = format != OutputFormat.Human;
+            if (!json)
             {
                 AnsiConsole.MarkupLine($"RunId: [cyan]{resumed.RunId:D}[/]  Status: [grey]{resumed.Status}[/]");
             }
             else
             {
-                WriteJsonLine(new { eventName = "run.resumed", runId = resumed.RunId, status = resumed.Status });
+                CliOutput.WriteJsonLine(new { eventName = "run.resumed", runId = resumed.RunId, status = resumed.Status });
             }
         }
         catch (Exception ex)
         {
-            AnsiConsole.MarkupLine($"[red]Failed to resume run:[/] {Markup.Escape(ex.Message ?? string.Empty)}");
+            if (format != OutputFormat.Human)
+            {
+                CliOutput.WriteJsonError("resume_failed", ex.Message ?? string.Empty);
+            }
+            else
+            {
+                AnsiConsole.MarkupLine($"[red]Failed to resume run:[/] {Markup.Escape(ex.Message ?? string.Empty)}");
+            }
             return 1;
         }
 
@@ -98,7 +151,7 @@ public sealed class ResumeCommand : AsyncCommand<ResumeCommand.Settings>
             return 0;
         }
 
-        return await ExecCommand.StreamAsync(client, runId, replay, follow, tail, settings.Json, cancellationToken);
+        return await ExecCommand.StreamAsync(client, runId, replay, follow, tail, format != OutputFormat.Human, cancellationToken);
     }
 
     private static string ResolvePrompt(Settings settings)
@@ -118,9 +171,4 @@ public sealed class ResumeCommand : AsyncCommand<ResumeCommand.Settings>
         return prompt;
     }
 
-    private static void WriteJsonLine(object value)
-    {
-        var json = JsonSerializer.Serialize(value, new JsonSerializerOptions(JsonSerializerDefaults.Web));
-        Console.Out.WriteLine(json);
-    }
 }

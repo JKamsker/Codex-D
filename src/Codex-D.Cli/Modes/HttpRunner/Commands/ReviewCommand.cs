@@ -1,6 +1,7 @@
 using System.ComponentModel;
 using CodexD.HttpRunner.Client;
 using CodexD.HttpRunner.Contracts;
+using CodexD.Shared.Output;
 using Spectre.Console;
 using Spectre.Console.Cli;
 
@@ -75,6 +76,23 @@ public sealed class ReviewCommand : AsyncCommand<ReviewCommand.Settings>
 
     public override async Task<int> ExecuteAsync(CommandContext context, Settings settings, CancellationToken cancellationToken)
     {
+        OutputFormat format;
+        try
+        {
+            format = settings.ResolveOutputFormat(OutputFormatUsage.Streaming);
+        }
+        catch (ArgumentException ex)
+        {
+            if (settings.Json)
+            {
+                CliOutput.WriteJsonError("invalid_outputformat", ex.Message);
+                return 2;
+            }
+
+            Console.Error.WriteLine(ex.Message);
+            return 2;
+        }
+
         ResolvedClientSettings resolved;
         try
         {
@@ -82,100 +100,121 @@ public sealed class ReviewCommand : AsyncCommand<ReviewCommand.Settings>
         }
         catch (RunnerResolutionFailure ex)
         {
-            Console.Error.WriteLine(ex.UserMessage);
+            if (format != OutputFormat.Human)
+            {
+                CliOutput.WriteJsonError("runner_not_found", ex.UserMessage);
+            }
+            else
+            {
+                Console.Error.WriteLine(ex.UserMessage);
+            }
             return 1;
         }
-        var prompt = ResolvePrompt(settings);
 
-        var mode = (settings.Mode ?? "exec").Trim();
-        if (string.IsNullOrWhiteSpace(mode))
+        try
         {
-            mode = "exec";
-        }
+            var prompt = ResolvePrompt(settings);
 
-        if (!string.Equals(mode, "exec", StringComparison.OrdinalIgnoreCase) &&
-            !string.Equals(mode, "appserver", StringComparison.OrdinalIgnoreCase))
-        {
-            throw new ArgumentException("Invalid --mode. Use 'exec' or 'appserver'.");
-        }
-
-        var baseBranch = TrimOrNull(settings.BaseBranch);
-        var commitSha = TrimOrNull(settings.CommitSha);
-        var uncommitted = settings.Uncommitted;
-
-        var targets = 0;
-        if (uncommitted) targets++;
-        if (!string.IsNullOrWhiteSpace(baseBranch)) targets++;
-        if (!string.IsNullOrWhiteSpace(commitSha)) targets++;
-
-        if (targets == 0)
-        {
-            uncommitted = true;
-        }
-
-        if (targets > 1)
-        {
-            throw new ArgumentException("Only one of --uncommitted, --base, or --commit can be specified.");
-        }
-
-        if (string.Equals(mode, "appserver", StringComparison.OrdinalIgnoreCase))
-        {
-            if (settings.Config.Length > 0 || settings.Enable.Length > 0 || settings.Disable.Length > 0 || settings.Arg.Length > 0)
+            var mode = (settings.Mode ?? "exec").Trim();
+            if (string.IsNullOrWhiteSpace(mode))
             {
-                throw new ArgumentException("--config/--enable/--disable/--arg are only supported with --mode exec.");
+                mode = "exec";
             }
+
+            if (!string.Equals(mode, "exec", StringComparison.OrdinalIgnoreCase) &&
+                !string.Equals(mode, "appserver", StringComparison.OrdinalIgnoreCase))
+            {
+                throw new ArgumentException("Invalid --mode. Use 'exec' or 'appserver'.");
+            }
+
+            var baseBranch = TrimOrNull(settings.BaseBranch);
+            var commitSha = TrimOrNull(settings.CommitSha);
+            var uncommitted = settings.Uncommitted;
+
+            var targets = 0;
+            if (uncommitted) targets++;
+            if (!string.IsNullOrWhiteSpace(baseBranch)) targets++;
+            if (!string.IsNullOrWhiteSpace(commitSha)) targets++;
+
+            if (targets == 0)
+            {
+                uncommitted = true;
+            }
+
+            if (targets > 1)
+            {
+                throw new ArgumentException("Only one of --uncommitted, --base, or --commit can be specified.");
+            }
+
+            if (string.Equals(mode, "appserver", StringComparison.OrdinalIgnoreCase))
+            {
+                if (settings.Config.Length > 0 || settings.Enable.Length > 0 || settings.Disable.Length > 0 || settings.Arg.Length > 0)
+                {
+                    throw new ArgumentException("--config/--enable/--disable/--arg are only supported with --mode exec.");
+                }
+            }
+
+            var review = new RunReviewRequest
+            {
+                Mode = mode,
+                Delivery = TrimOrNull(settings.Delivery),
+                Uncommitted = uncommitted,
+                BaseBranch = baseBranch,
+                CommitSha = commitSha,
+                Title = TrimOrNull(settings.Title),
+                AdditionalOptions = string.Equals(mode, "appserver", StringComparison.OrdinalIgnoreCase)
+                    ? []
+                    : BuildAdditionalOptions(settings)
+            };
+
+            var request = new CreateRunRequest
+            {
+                Cwd = resolved.Cwd,
+                Prompt = prompt,
+                Kind = RunKinds.Review,
+                Review = review,
+                Model = TrimOrNull(settings.Model),
+                ApprovalPolicy = string.IsNullOrWhiteSpace(settings.ApprovalPolicy) ? "never" : settings.ApprovalPolicy.Trim()
+            };
+
+            using var client = new RunnerClient(resolved.BaseUrl, resolved.Token);
+            var created = await client.CreateRunAsync(request, cancellationToken);
+
+            var json = format != OutputFormat.Human;
+            if (json)
+            {
+                CliOutput.WriteJsonLine(new { eventName = "run.created", runId = created.RunId, status = created.Status });
+            }
+            else
+            {
+                AnsiConsole.MarkupLine($"RunId: [cyan]{created.RunId:D}[/]  Status: [grey]{created.Status}[/]");
+            }
+
+            if (settings.Detach)
+            {
+                return 0;
+            }
+
+            return await ExecCommand.StreamAsync(
+                client,
+                created.RunId,
+                replay: true,
+                follow: true,
+                tail: null,
+                json,
+                cancellationToken);
         }
-
-        var review = new RunReviewRequest
+        catch (ArgumentException ex)
         {
-            Mode = mode,
-            Delivery = TrimOrNull(settings.Delivery),
-            Uncommitted = uncommitted,
-            BaseBranch = baseBranch,
-            CommitSha = commitSha,
-            Title = TrimOrNull(settings.Title),
-            AdditionalOptions = string.Equals(mode, "appserver", StringComparison.OrdinalIgnoreCase)
-                ? []
-                : BuildAdditionalOptions(settings)
-        };
+            if (format != OutputFormat.Human)
+            {
+                CliOutput.WriteJsonError("invalid_args", ex.Message);
+                return 2;
+            }
 
-        var request = new CreateRunRequest
-        {
-            Cwd = resolved.Cwd,
-            Prompt = prompt,
-            Kind = RunKinds.Review,
-            Review = review,
-            Model = TrimOrNull(settings.Model),
-            ApprovalPolicy = string.IsNullOrWhiteSpace(settings.ApprovalPolicy) ? "never" : settings.ApprovalPolicy.Trim()
-        };
-
-        using var client = new RunnerClient(resolved.BaseUrl, resolved.Token);
-        var created = await client.CreateRunAsync(request, cancellationToken);
-
-        if (settings.Json)
-        {
-            Console.Out.WriteLine(System.Text.Json.JsonSerializer.Serialize(
-                new { eventName = "run.created", runId = created.RunId, status = created.Status },
-                new System.Text.Json.JsonSerializerOptions(System.Text.Json.JsonSerializerDefaults.Web)));
+            Console.Error.WriteLine(ex.Message);
+            return 2;
         }
-        else
-        {
-            AnsiConsole.MarkupLine($"RunId: [cyan]{created.RunId:D}[/]  Status: [grey]{created.Status}[/]");
-        }
-
-        if (settings.Detach)
-        {
-            return 0;
-        }
-
-        return await ExecCommand.StreamAsync(
-            client,
-            created.RunId,
-            replay: true,
-            follow: true,
-            tail: null,
-            json: settings.Json,
-            cancellationToken);
     }
 
     private static string ResolvePrompt(Settings settings)

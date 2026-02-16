@@ -1,6 +1,6 @@
 using System.ComponentModel;
-using System.Text.Json;
 using CodexD.HttpRunner.Client;
+using CodexD.Shared.Output;
 using Spectre.Console;
 using Spectre.Console.Cli;
 
@@ -28,6 +28,23 @@ public sealed class SteerCommand : AsyncCommand<SteerCommand.Settings>
 
     public override async Task<int> ExecuteAsync(CommandContext context, Settings settings, CancellationToken cancellationToken)
     {
+        OutputFormat format;
+        try
+        {
+            format = settings.ResolveOutputFormat(OutputFormatUsage.Single);
+        }
+        catch (ArgumentException ex)
+        {
+            if (settings.Json)
+            {
+                CliOutput.WriteJsonError("invalid_outputformat", ex.Message);
+                return 2;
+            }
+
+            Console.Error.WriteLine(ex.Message);
+            return 2;
+        }
+
         ResolvedClientSettings resolved;
         try
         {
@@ -35,7 +52,14 @@ public sealed class SteerCommand : AsyncCommand<SteerCommand.Settings>
         }
         catch (RunnerResolutionFailure ex)
         {
-            Console.Error.WriteLine(ex.UserMessage);
+            if (format != OutputFormat.Human)
+            {
+                CliOutput.WriteJsonError("runner_not_found", ex.UserMessage);
+            }
+            else
+            {
+                Console.Error.WriteLine(ex.UserMessage);
+            }
             return 1;
         }
 
@@ -48,7 +72,14 @@ public sealed class SteerCommand : AsyncCommand<SteerCommand.Settings>
             var latest = runs.OrderByDescending(x => x.CreatedAt).FirstOrDefault();
             if (latest is null)
             {
-                AnsiConsole.MarkupLine("[red]No runs found for this directory.[/]");
+                if (format != OutputFormat.Human)
+                {
+                    CliOutput.WriteJsonError("no_runs", "No runs found for this directory.");
+                }
+                else
+                {
+                    AnsiConsole.MarkupLine("[red]No runs found for this directory.[/]");
+                }
                 return 1;
             }
 
@@ -58,7 +89,14 @@ public sealed class SteerCommand : AsyncCommand<SteerCommand.Settings>
         {
             if (string.IsNullOrWhiteSpace(settings.RunId) || !Guid.TryParse(settings.RunId, out runId))
             {
-                AnsiConsole.MarkupLine("[red]Missing or invalid RUN_ID.[/]");
+                if (format != OutputFormat.Human)
+                {
+                    CliOutput.WriteJsonError("invalid_run_id", "Missing or invalid RUN_ID.");
+                }
+                else
+                {
+                    AnsiConsole.MarkupLine("[red]Missing or invalid RUN_ID.[/]");
+                }
                 return 2;
             }
         }
@@ -66,7 +104,14 @@ public sealed class SteerCommand : AsyncCommand<SteerCommand.Settings>
         var prompt = ResolvePrompt(settings);
         if (string.IsNullOrWhiteSpace(prompt))
         {
-            AnsiConsole.MarkupLine("[red]Missing steer prompt.[/]");
+            if (format != OutputFormat.Human)
+            {
+                CliOutput.WriteJsonError("invalid_args", "Missing steer prompt.");
+            }
+            else
+            {
+                AnsiConsole.MarkupLine("[red]Missing steer prompt.[/]");
+            }
             return 2;
         }
 
@@ -76,13 +121,20 @@ public sealed class SteerCommand : AsyncCommand<SteerCommand.Settings>
         }
         catch (Exception ex)
         {
-            AnsiConsole.MarkupLine($"[red]Failed to steer run:[/] {Markup.Escape(ex.Message ?? string.Empty)}");
+            if (format != OutputFormat.Human)
+            {
+                CliOutput.WriteJsonError("steer_failed", ex.Message ?? string.Empty);
+            }
+            else
+            {
+                AnsiConsole.MarkupLine($"[red]Failed to steer run:[/] {Markup.Escape(ex.Message ?? string.Empty)}");
+            }
             return 1;
         }
 
-        if (settings.Json)
+        if (format != OutputFormat.Human)
         {
-            WriteJsonLine(new { eventName = "run.steered", runId });
+            CliOutput.WriteJsonLine(new { eventName = "run.steered", runId });
         }
         else
         {
@@ -106,12 +158,6 @@ public sealed class SteerCommand : AsyncCommand<SteerCommand.Settings>
         }
 
         return string.IsNullOrWhiteSpace(prompt) ? string.Empty : prompt;
-    }
-
-    private static void WriteJsonLine(object value)
-    {
-        var json = JsonSerializer.Serialize(value, new JsonSerializerOptions(JsonSerializerDefaults.Web));
-        Console.Out.WriteLine(json);
     }
 }
 

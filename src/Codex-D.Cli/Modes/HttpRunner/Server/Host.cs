@@ -33,11 +33,18 @@ public static class Host
         });
 
         builder.Logging.ClearProviders();
-        builder.Logging.AddSimpleConsole(x =>
+        if (config.JsonLogs)
         {
-            x.SingleLine = true;
-            x.TimestampFormat = "HH:mm:ss ";
-        });
+            builder.Logging.AddJsonConsole();
+        }
+        else
+        {
+            builder.Logging.AddSimpleConsole(x =>
+            {
+                x.SingleLine = true;
+                x.TimestampFormat = "HH:mm:ss ";
+            });
+        }
 
         builder.Services.Configure<JsonOptions>(o =>
         {

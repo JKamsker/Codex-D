@@ -1,4 +1,5 @@
 using CodexD.HttpRunner.Client;
+using CodexD.Shared.Output;
 using Spectre.Console;
 using Spectre.Console.Cli;
 
@@ -14,6 +15,23 @@ public sealed class LsCommand : AsyncCommand<LsCommand.Settings>
 
     public override async Task<int> ExecuteAsync(CommandContext context, Settings settings, CancellationToken cancellationToken)
     {
+        OutputFormat format;
+        try
+        {
+            format = settings.ResolveOutputFormat(OutputFormatUsage.Single);
+        }
+        catch (ArgumentException ex)
+        {
+            if (settings.Json)
+            {
+                CliOutput.WriteJsonError("invalid_outputformat", ex.Message);
+                return 2;
+            }
+
+            Console.Error.WriteLine(ex.Message);
+            return 2;
+        }
+
         ResolvedClientSettings resolved;
         try
         {
@@ -21,17 +39,23 @@ public sealed class LsCommand : AsyncCommand<LsCommand.Settings>
         }
         catch (RunnerResolutionFailure ex)
         {
-            Console.Error.WriteLine(ex.UserMessage);
+            if (format != OutputFormat.Human)
+            {
+                CliOutput.WriteJsonError("runner_not_found", ex.UserMessage);
+            }
+            else
+            {
+                Console.Error.WriteLine(ex.UserMessage);
+            }
             return 1;
         }
         using var client = new RunnerClient(resolved.BaseUrl, resolved.Token);
 
         var runs = await client.ListRunsAsync(resolved.Cwd, settings.All, cancellationToken);
 
-        if (settings.Json)
+        if (format != OutputFormat.Human)
         {
-            var json = System.Text.Json.JsonSerializer.Serialize(new { items = runs }, new System.Text.Json.JsonSerializerOptions(System.Text.Json.JsonSerializerDefaults.Web));
-            Console.Out.WriteLine(json);
+            CliOutput.WriteJsonLine(new { items = runs });
             return 0;
         }
 

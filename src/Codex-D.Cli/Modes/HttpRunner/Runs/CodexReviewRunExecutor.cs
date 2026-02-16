@@ -91,7 +91,19 @@ public sealed class CodexReviewRunExecutor : IRunExecutor
 
             if (!string.IsNullOrWhiteSpace(result.LogPath))
             {
-                await context.SetCodexIdsAsync("review", null, result.LogPath, linked.Token);
+                try
+                {
+                    await context.SetCodexIdsAsync("review", null, result.LogPath, linked.Token);
+                }
+                catch (Exception ex) when (ex is not OperationCanceledException)
+                {
+                    _logger.LogWarning(
+                        ex,
+                        "Failed to update Codex IDs with review log path {LogPath} for run {RunId} (Cwd: {Cwd}).",
+                        result.LogPath,
+                        context.RunId,
+                        context.Cwd);
+                }
             }
 
             var status = result.ExitCode == 0 ? RunStatuses.Succeeded : RunStatuses.Failed;

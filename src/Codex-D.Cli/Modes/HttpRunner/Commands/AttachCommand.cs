@@ -140,6 +140,6 @@ public sealed class AttachCommand : AsyncCommand<AttachCommand.Settings>
             AnsiConsole.MarkupLine($"Attaching to [cyan]{runId:D}[/]...");
         }
 
-        return await ExecCommand.StreamAsync(client, runId, replay, follow, tail, json, cancellationToken);
+        return await ExecCommand.StreamAsync(client, runId, replay, follow, tail, format, cancellationToken);
     }
 }

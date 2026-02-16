@@ -826,6 +826,7 @@ public static class Host
             return 0;
         }
 
+        var createdAtTolerance = TimeSpan.FromSeconds(5);
         var maxOverlap = Math.Min(history.Count, pending.Count);
         for (var overlap = maxOverlap; overlap >= 1; overlap--)
         {
@@ -833,7 +834,10 @@ public static class Host
             var match = true;
             for (var i = 0; i < overlap; i++)
             {
-                if (!string.Equals(history[historyStart + i].Text, pending[i].Text, StringComparison.Ordinal))
+                var h = history[historyStart + i];
+                var p = pending[i];
+                if (!string.Equals(h.Text, p.Text, StringComparison.Ordinal) ||
+                    (h.CreatedAt - p.CreatedAt).Duration() > createdAtTolerance)
                 {
                     match = false;
                     break;

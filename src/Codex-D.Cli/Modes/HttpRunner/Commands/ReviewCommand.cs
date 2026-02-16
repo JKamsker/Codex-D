@@ -211,7 +211,7 @@ public sealed class ReviewCommand : AsyncCommand<ReviewCommand.Settings>
                 replay: true,
                 follow: true,
                 tail: null,
-                json,
+                format,
                 cancellationToken);
         }
         catch (ArgumentException ex)

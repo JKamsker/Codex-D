@@ -101,7 +101,7 @@ public sealed class ExecCommand : AsyncCommand<ExecCommand.Settings>
                 return 0;
             }
 
-            return await StreamAsync(client, runId, replay: true, follow: true, tail: null, json: format != OutputFormat.Human, cancellationToken);
+            return await StreamAsync(client, runId, replay: true, follow: true, tail: null, format, cancellationToken);
         }
         catch (ArgumentException ex)
         {
@@ -157,9 +157,10 @@ public sealed class ExecCommand : AsyncCommand<ExecCommand.Settings>
         bool replay,
         bool follow,
         int? tail,
-        bool json,
+        OutputFormat format,
         CancellationToken cancellationToken)
     {
+        var json = format != OutputFormat.Human;
         var sawCompletion = false;
         var exitCode = 0;
 
@@ -245,14 +246,14 @@ public sealed class ExecCommand : AsyncCommand<ExecCommand.Settings>
             }
         }
 
-        if (!json)
+        if (format == OutputFormat.Human)
         {
             Console.Out.Flush();
         }
 
         if (follow && !sawCompletion && !cancellationToken.IsCancellationRequested)
         {
-            if (!json)
+            if (format == OutputFormat.Human)
             {
                 Console.Error.WriteLine("Event stream ended before run.completed was received.");
             }

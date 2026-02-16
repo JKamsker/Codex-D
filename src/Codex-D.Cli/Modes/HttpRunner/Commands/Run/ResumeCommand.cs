@@ -155,7 +155,7 @@ public sealed class ResumeCommand : AsyncCommand<ResumeCommand.Settings>
             return 0;
         }
 
-        return await ExecCommand.StreamAsync(client, runId, replay, follow, tail, format != OutputFormat.Human, cancellationToken);
+        return await ExecCommand.StreamAsync(client, runId, replay, follow, tail, format, cancellationToken);
     }
 
     private static string ResolvePrompt(Settings settings)

@@ -303,7 +303,7 @@ public static class Host
         {
             var prompt = string.IsNullOrWhiteSpace(request?.Prompt) ? "continue" : request!.Prompt!.Trim();
 
-            var resumed = await runs.ResumeAsync(runId, prompt, ct);
+            var resumed = await runs.ResumeAsync(runId, prompt, request?.Effort, ct);
             return resumed is null
                 ? Results.NotFound(new { error = "not_found_or_not_resumable" })
                 : Results.Ok(new { runId = resumed.RunId, status = resumed.Status });

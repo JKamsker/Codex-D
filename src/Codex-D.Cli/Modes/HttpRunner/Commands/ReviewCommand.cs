@@ -52,6 +52,10 @@ public sealed class ReviewCommand : AsyncCommand<ReviewCommand.Settings>
         [Description("Model the review should use (forwarded to `codex review`).")]
         public string? Model { get; init; }
 
+        [CommandOption("--effort|--reasoning-effort <EFFORT>")]
+        [Description("Reasoning effort override (exec-mode only). Examples: none, minimal, low, medium, high, xhigh.")]
+        public string? Effort { get; init; }
+
         [CommandOption("-c|--config <KEY=VALUE>")]
         [Description("Forward a `--config <key=value>` option to `codex review` (repeatable).")]
         public string[] Config { get; init; } = [];
@@ -148,6 +152,11 @@ public sealed class ReviewCommand : AsyncCommand<ReviewCommand.Settings>
 
             if (string.Equals(mode, "appserver", StringComparison.OrdinalIgnoreCase))
             {
+                if (!string.IsNullOrWhiteSpace(settings.Effort))
+                {
+                    throw new ArgumentException("--effort/--reasoning-effort is only supported with --mode exec.");
+                }
+
                 if (settings.Config.Length > 0 || settings.Enable.Length > 0 || settings.Disable.Length > 0 || settings.Arg.Length > 0)
                 {
                     throw new ArgumentException("--config/--enable/--disable/--arg are only supported with --mode exec.");
@@ -174,6 +183,7 @@ public sealed class ReviewCommand : AsyncCommand<ReviewCommand.Settings>
                 Kind = RunKinds.Review,
                 Review = review,
                 Model = TrimOrNull(settings.Model),
+                Effort = TrimOrNull(settings.Effort),
                 ApprovalPolicy = string.IsNullOrWhiteSpace(settings.ApprovalPolicy) ? "never" : settings.ApprovalPolicy.Trim()
             };
 

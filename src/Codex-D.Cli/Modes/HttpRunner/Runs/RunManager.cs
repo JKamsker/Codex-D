@@ -49,6 +49,7 @@ public sealed class RunManager
             kind: kind,
             review: request.Review,
             model: string.IsNullOrWhiteSpace(request.Model) ? null : request.Model.Trim(),
+            effort: string.IsNullOrWhiteSpace(request.Effort) ? null : request.Effort.Trim(),
             sandbox: string.IsNullOrWhiteSpace(request.Sandbox) ? null : request.Sandbox.Trim(),
             approvalPolicy: string.IsNullOrWhiteSpace(request.ApprovalPolicy) ? null : request.ApprovalPolicy.Trim(),
             ct);
@@ -133,7 +134,7 @@ public sealed class RunManager
         }
     }
 
-    public async Task<Run?> ResumeAsync(Guid runId, string prompt, CancellationToken ct)
+    public async Task<Run?> ResumeAsync(Guid runId, string prompt, string? effort, CancellationToken ct)
     {
         var record = await _store.TryGetAsync(runId, ct);
         if (record is null)
@@ -152,11 +153,14 @@ public sealed class RunManager
             return null;
         }
 
+        var normalizedEffort = string.IsNullOrWhiteSpace(effort) ? null : effort.Trim();
+
         var queued = record with
         {
             Status = RunStatuses.Queued,
             CompletedAt = null,
-            Error = null
+            Error = null,
+            Effort = normalizedEffort ?? record.Effort
         };
 
         var active = new ActiveRun(runId);
@@ -324,6 +328,7 @@ public sealed class RunManager
                 Kind = record.Kind,
                 Review = record.Review,
                 Model = record.Model,
+                Effort = record.Effort,
                 Sandbox = record.Sandbox,
                 ApprovalPolicy = record.ApprovalPolicy,
                 PublishNotificationAsync = PublishNotificationAsync,

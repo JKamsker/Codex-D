@@ -35,6 +35,7 @@ public sealed class RunStore
         string? kind,
         RunReviewRequest? review,
         string? model,
+        string? effort,
         string? sandbox,
         string? approvalPolicy,
         CancellationToken ct)
@@ -60,6 +61,7 @@ public sealed class RunStore
             Kind = kind,
             Review = review,
             Model = model,
+            Effort = effort,
             Sandbox = sandbox,
             ApprovalPolicy = approvalPolicy,
             Error = null

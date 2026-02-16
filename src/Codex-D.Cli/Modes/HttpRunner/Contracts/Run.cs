@@ -14,6 +14,7 @@ public sealed record class Run
     public string? Kind { get; init; }
     public RunReviewRequest? Review { get; init; }
     public string? Model { get; init; }
+    public string? Effort { get; init; }
     public string? Sandbox { get; init; }
     public string? ApprovalPolicy { get; init; }
     public string? Error { get; init; }

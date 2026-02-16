@@ -26,6 +26,10 @@ public sealed class ExecCommand : AsyncCommand<ExecCommand.Settings>
         [CommandOption("--model <MODEL>")]
         public string? Model { get; init; }
 
+        [CommandOption("--effort|--reasoning-effort <EFFORT>")]
+        [Description("Reasoning effort override (e.g. none, minimal, low, medium, high, xhigh).")]
+        public string? Effort { get; init; }
+
         [CommandOption("--sandbox <MODE>")]
         public string? Sandbox { get; init; }
 
@@ -118,6 +122,7 @@ public sealed class ExecCommand : AsyncCommand<ExecCommand.Settings>
             Cwd = cwd,
             Prompt = prompt,
             Model = string.IsNullOrWhiteSpace(settings.Model) ? null : settings.Model.Trim(),
+            Effort = string.IsNullOrWhiteSpace(settings.Effort) ? null : settings.Effort.Trim(),
             Sandbox = string.IsNullOrWhiteSpace(settings.Sandbox) ? null : settings.Sandbox.Trim(),
             ApprovalPolicy = string.IsNullOrWhiteSpace(settings.ApprovalPolicy) ? "never" : settings.ApprovalPolicy.Trim()
         };

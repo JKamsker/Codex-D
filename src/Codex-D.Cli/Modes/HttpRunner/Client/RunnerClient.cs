@@ -122,8 +122,11 @@ public sealed class RunnerClient : IDisposable
     }
 
     public async Task<CreateRunResponse> ResumeAsync(Guid runId, string? prompt, CancellationToken ct)
+        => await ResumeAsync(runId, prompt, effort: null, ct);
+
+    public async Task<CreateRunResponse> ResumeAsync(Guid runId, string? prompt, string? effort, CancellationToken ct)
     {
-        var body = JsonSerializer.Serialize(new ResumeRunRequest { Prompt = prompt }, Json);
+        var body = JsonSerializer.Serialize(new ResumeRunRequest { Prompt = prompt, Effort = effort }, Json);
         using var content = new StringContent(body, Encoding.UTF8, "application/json");
         using var res = await _http.PostAsync($"{_baseUrl}/v1/runs/{runId:D}/resume", content, ct);
         var text = await res.Content.ReadAsStringAsync(ct);

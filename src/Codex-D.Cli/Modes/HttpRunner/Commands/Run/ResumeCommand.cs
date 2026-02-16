@@ -15,6 +15,10 @@ public sealed class ResumeCommand : AsyncCommand<ResumeCommand.Settings>
         [Description("Prompt text for the resumed turn. Default: \"continue\". Use '-' to read stdin.")]
         public string? PromptOption { get; init; }
 
+        [CommandOption("--effort|--reasoning-effort <EFFORT>")]
+        [Description("Reasoning effort override for the resumed turn (e.g. none, minimal, low, medium, high, xhigh).")]
+        public string? Effort { get; init; }
+
         [CommandOption("-d|--detach")]
         [Description("Detach after resuming the run (does not stream output).")]
         public bool Detach { get; init; }
@@ -122,7 +126,7 @@ public sealed class ResumeCommand : AsyncCommand<ResumeCommand.Settings>
 
         try
         {
-            var resumed = await client.ResumeAsync(runId, prompt, cancellationToken);
+            var resumed = await client.ResumeAsync(runId, prompt, settings.Effort, cancellationToken);
             var json = format != OutputFormat.Human;
             if (!json)
             {

@@ -14,6 +14,19 @@ public sealed class RunNotificationBacklog
 
     private readonly ConcurrentDictionary<Guid, BacklogState> _states = new();
 
+    public DateTimeOffset? GetLastNotificationAt(Guid runId)
+    {
+        if (!_states.TryGetValue(runId, out var state))
+        {
+            return null;
+        }
+
+        lock (state.Gate)
+        {
+            return state.LastNotificationAt;
+        }
+    }
+
     public void SetRolloutPath(Guid runId, string? rolloutPath)
     {
         rolloutPath = CodexRolloutPathNormalizer.Normalize(rolloutPath);
@@ -39,6 +52,7 @@ public sealed class RunNotificationBacklog
         var state = _states.GetOrAdd(runId, _ => new BacklogState());
         lock (state.Gate)
         {
+            state.LastNotificationAt = envelope.CreatedAt;
             state.Events.Enqueue(envelope);
             while (state.Events.Count > MaxBufferedNotificationsPerRun)
             {
@@ -217,6 +231,7 @@ public sealed class RunNotificationBacklog
     {
         public object Gate { get; } = new();
         public Queue<RunEventEnvelope> Events { get; } = new();
+        public DateTimeOffset? LastNotificationAt { get; set; }
         public string? RolloutPath { get; set; }
         public DateTimeOffset? MaterializedAt { get; set; }
         public DateTimeOffset NextRefreshAtUtc { get; set; }

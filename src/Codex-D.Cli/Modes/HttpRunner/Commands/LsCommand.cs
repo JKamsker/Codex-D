@@ -59,9 +59,15 @@ public sealed class LsCommand : AsyncCommand<LsCommand.Settings>
             return 0;
         }
 
+        AnsiConsole.Write(new Rule("[bold]codex-d http runs ls[/]").LeftJustified());
+        var nowLocal = DateTimeOffset.Now;
+        AnsiConsole.MarkupLine($"Now: [grey]{nowLocal:yyyy-MM-dd HH:mm:ss}[/]");
+        AnsiConsole.WriteLine();
+
         var table = new Table().Border(TableBorder.Rounded);
         table.AddColumn("RunId");
         table.AddColumn("Created");
+        table.AddColumn("LastRecv");
         table.AddColumn("Status");
         if (settings.All)
         {
@@ -71,13 +77,14 @@ public sealed class LsCommand : AsyncCommand<LsCommand.Settings>
         foreach (var r in runs.OrderByDescending(x => x.CreatedAt))
         {
             var created = r.CreatedAt.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss");
+            var lastRecv = r.CodexLastNotificationAt?.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss") ?? "-";
             if (settings.All)
             {
-                table.AddRow(r.RunId.ToString("D"), created, r.Status, r.Cwd);
+                table.AddRow(r.RunId.ToString("D"), created, lastRecv, r.Status, r.Cwd);
             }
             else
             {
-                table.AddRow(r.RunId.ToString("D"), created, r.Status);
+                table.AddRow(r.RunId.ToString("D"), created, lastRecv, r.Status);
             }
         }
 

@@ -260,7 +260,7 @@ public static class Host
             }
         });
 
-        app.MapGet("/v1/runs", async (HttpRequest req, RunStore store, CancellationToken ct) =>
+        app.MapGet("/v1/runs", async (HttpRequest req, RunStore store, RunNotificationBacklog backlog, CancellationToken ct) =>
         {
             var all = ParseBool(req.Query["all"]) ?? false;
             var cwd = req.Query["cwd"].ToString();
@@ -283,13 +283,18 @@ public static class Host
             }
 
             var items = await store.ListAsync(all ? null : cwd, all, ct);
-            return Results.Ok(new { items });
+            var merged = new List<Run>(items.Count);
+            foreach (var item in items)
+            {
+                merged.Add(WithCodexLastNotificationAt(item, backlog));
+            }
+            return Results.Ok(new { items = merged });
         });
 
-        app.MapGet("/v1/runs/{runId:guid}", async (Guid runId, RunStore store, CancellationToken ct) =>
+        app.MapGet("/v1/runs/{runId:guid}", async (Guid runId, RunStore store, RunNotificationBacklog backlog, CancellationToken ct) =>
         {
             var record = await store.TryGetAsync(runId, ct);
-            return record is null ? Results.NotFound(new { error = "not_found" }) : Results.Ok(record);
+            return record is null ? Results.NotFound(new { error = "not_found" }) : Results.Ok(WithCodexLastNotificationAt(record, backlog));
         });
 
         app.MapPost("/v1/runs/{runId:guid}/interrupt", async (Guid runId, RunManager runs, CancellationToken ct) =>
@@ -891,6 +896,22 @@ public static class Host
         }
 
         queue.Enqueue(new { createdAt, text });
+    }
+
+    private static Run WithCodexLastNotificationAt(Run run, RunNotificationBacklog backlog)
+    {
+        var last = backlog.GetLastNotificationAt(run.RunId);
+        if (last is null)
+        {
+            return run;
+        }
+
+        if (run.CodexLastNotificationAt is null || last.Value > run.CodexLastNotificationAt.Value)
+        {
+            return run with { CodexLastNotificationAt = last };
+        }
+
+        return run;
     }
 
     private static bool HasRawEventsFile(string runDirectory) =>

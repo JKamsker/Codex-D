@@ -10,6 +10,7 @@ public sealed record class Run
     public DateTimeOffset? CompletedAt { get; init; }
     public string? CodexThreadId { get; init; }
     public string? CodexTurnId { get; init; }
+    public DateTimeOffset? CodexLastNotificationAt { get; init; }
     public string? CodexRolloutPath { get; init; }
     public string? Kind { get; init; }
     public RunReviewRequest? Review { get; init; }

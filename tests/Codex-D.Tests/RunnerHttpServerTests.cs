@@ -83,6 +83,47 @@ public sealed class RunnerHttpServerTests
     }
 
     [Fact]
+    public async Task Runs_List_IncludesCodexLastNotificationAt_ForActiveRun()
+    {
+        var exec = new CoordinatedExecutor();
+        await using var host = await RunnerHttpTestHost.StartAsync(requireAuth: false, exec);
+        using var sdk = host.CreateSdkClient(includeToken: false);
+
+        var cwd = Path.Combine(host.StateDir, "repo");
+        Directory.CreateDirectory(cwd);
+
+        var created = await sdk.CreateRunAsync(new CreateRunRequest { Cwd = cwd, Prompt = "hi", Model = null, Sandbox = null, ApprovalPolicy = "never" }, CancellationToken.None);
+        var runId = created.RunId;
+
+        await exec.FirstPublished.Task;
+
+        var list = await sdk.ListRunsAsync(cwd, all: false, CancellationToken.None);
+        Assert.Single(list);
+        Assert.NotNull(list[0].CodexLastNotificationAt);
+
+        exec.AllowContinue.TrySetResult();
+        await WaitForEventAsync(sdk, runId, "run.completed", TimeSpan.FromSeconds(5));
+    }
+
+    [Fact]
+    public async Task Runs_Get_IncludesCodexLastNotificationAt_AfterCompletion()
+    {
+        await using var host = await RunnerHttpTestHost.StartAsync(requireAuth: false, new ImmediateSuccessExecutor());
+        using var sdk = host.CreateSdkClient(includeToken: false);
+
+        var cwd = Path.Combine(host.StateDir, "repo");
+        Directory.CreateDirectory(cwd);
+
+        var created = await sdk.CreateRunAsync(new CreateRunRequest { Cwd = cwd, Prompt = "hi", Model = null, Sandbox = null, ApprovalPolicy = "never" }, CancellationToken.None);
+        var runId = created.RunId;
+
+        await WaitForTerminalAsync(sdk, runId, TimeSpan.FromSeconds(2));
+
+        var run = await sdk.GetRunAsync(runId, CancellationToken.None);
+        Assert.NotNull(run.CodexLastNotificationAt);
+    }
+
+    [Fact]
     public async Task Runs_Create_ReturnsBadRequest_WhenCwdDoesNotExist()
     {
         await using var host = await RunnerHttpTestHost.StartAsync(requireAuth: false, new ImmediateSuccessExecutor());

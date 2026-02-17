@@ -206,12 +206,20 @@ public sealed class RunManager
                     continue;
                 }
 
+                var lastFromBacklog = _backlog.GetLastNotificationAt(runId);
+                var bestLast = record.CodexLastNotificationAt;
+                if (lastFromBacklog is not null && (bestLast is null || lastFromBacklog.Value > bestLast.Value))
+                {
+                    bestLast = lastFromBacklog;
+                }
+
                 var now = DateTimeOffset.UtcNow;
                 var failed = record with
                 {
                     Status = RunStatuses.Failed,
                     CompletedAt = now,
-                    Error = reason
+                    Error = reason,
+                    CodexLastNotificationAt = bestLast
                 };
 
                 await _store.UpdateAsync(runId, failed, ct);
@@ -266,11 +274,19 @@ public sealed class RunManager
                     continue;
                 }
 
+                var lastFromBacklog = _backlog.GetLastNotificationAt(runId);
+                var bestLast = record.CodexLastNotificationAt;
+                if (lastFromBacklog is not null && (bestLast is null || lastFromBacklog.Value > bestLast.Value))
+                {
+                    bestLast = lastFromBacklog;
+                }
+
                 var paused = record with
                 {
                     Status = RunStatuses.Paused,
                     CompletedAt = null,
-                    Error = reason
+                    Error = reason,
+                    CodexLastNotificationAt = bestLast
                 };
 
                 await _store.UpdateAsync(runId, paused, ct);
@@ -293,6 +309,7 @@ public sealed class RunManager
         active.Cancellation = runCts;
 
         var runId = record.RunId;
+        DateTimeOffset? lastNotificationAt = record.CodexLastNotificationAt;
         try
         {
             var now = DateTimeOffset.UtcNow;
@@ -300,8 +317,11 @@ public sealed class RunManager
             await _store.UpdateAsync(runId, record, runCts.Token);
             await AppendAndPublishAsync(runId, "run.meta", record, runCts.Token);
 
-            Task PublishNotificationAsync(string method, JsonElement @params, CancellationToken ct) =>
-                AppendAndPublishAsync(runId, "codex.notification", new { method, @params }, ct);
+            Task PublishNotificationAsync(string method, JsonElement @params, CancellationToken ct)
+            {
+                lastNotificationAt = DateTimeOffset.UtcNow;
+                return AppendAndPublishAsync(runId, "codex.notification", new { method, @params }, ct);
+            }
 
             async Task SetCodexIdsAsync(string threadId, string? turnId, string? rolloutPath, CancellationToken ct)
             {
@@ -349,7 +369,8 @@ public sealed class RunManager
                 {
                     Status = RunStatuses.Paused,
                     CompletedAt = null,
-                    Error = null
+                    Error = null,
+                    CodexLastNotificationAt = lastNotificationAt
                 };
 
                 await _store.UpdateAsync(runId, paused, CancellationToken.None);
@@ -361,7 +382,8 @@ public sealed class RunManager
             {
                 Status = result.Status,
                 CompletedAt = DateTimeOffset.UtcNow,
-                Error = result.Error
+                Error = result.Error,
+                CodexLastNotificationAt = lastNotificationAt
             };
 
             await _store.UpdateAsync(runId, completed, runCts.Token);
@@ -382,7 +404,8 @@ public sealed class RunManager
             {
                 Status = RunStatuses.Paused,
                 CompletedAt = null,
-                Error = "codex runtime disconnected"
+                Error = "codex runtime disconnected",
+                CodexLastNotificationAt = lastNotificationAt
             };
             try
             {
@@ -407,7 +430,8 @@ public sealed class RunManager
             {
                 Status = RunStatuses.Failed,
                 CompletedAt = now,
-                Error = ex.Message
+                Error = ex.Message,
+                CodexLastNotificationAt = lastNotificationAt
             };
             try
             {

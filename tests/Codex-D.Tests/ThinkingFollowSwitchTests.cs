@@ -21,7 +21,6 @@ public sealed class ThinkingFollowSwitchTests
 
         var template = data!.ConstructorArguments.FirstOrDefault().Value as string;
         Assert.False(string.IsNullOrWhiteSpace(template));
-        Assert.Contains("--follow", template!, StringComparison.Ordinal);
+        Assert.Contains("-f|--follow", template!, StringComparison.Ordinal);
     }
 }
-

@@ -17,7 +17,7 @@ public sealed class RunThinkingCommand : AsyncCommand<RunThinkingCommand.Setting
         [Description("Only scan the last N events on the server (performance guard). Default: 20000.")]
         public int? TailEvents { get; init; }
 
-        [CommandOption("--follow")]
+        [CommandOption("-f|--follow")]
         [Description("Keep following run events and print new thinking summaries as they appear (human output only).")]
         public bool Follow { get; init; }
 

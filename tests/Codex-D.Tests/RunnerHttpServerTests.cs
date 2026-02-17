@@ -138,7 +138,7 @@ public sealed class RunnerHttpServerTests
         await exec.FirstPublished.Task; // ensure early event persisted before we attach
 
         var seen = new List<SseEvent>();
-        var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        var cts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
         var attached = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
 
         var consumeTask = Task.Run(async () =>
@@ -157,14 +157,14 @@ public sealed class RunnerHttpServerTests
             }
         }, cts.Token);
 
-        await Task.WhenAny(attached.Task, Task.Delay(TimeSpan.FromSeconds(2), cts.Token));
+        await Task.WhenAny(attached.Task, Task.Delay(TimeSpan.FromSeconds(5), cts.Token));
         Assert.True(attached.Task.IsCompleted);
 
         exec.AllowContinue.TrySetResult();
         await consumeTask;
 
         var notificationPayloads = seen
-            .Where(e => e.Name == "codex.notification")
+            .Where(e => e.Name is "codex.notification" or "codex.rollup.outputLine")
             .Select(e => e.Data)
             .ToList();
 

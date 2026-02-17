@@ -248,6 +248,33 @@ public sealed class RunnerClient : IDisposable
         return items;
     }
 
+    public async Task<IReadOnlyList<ThinkingSummaryItem>> GetRunThinkingSummaryItemsAsync(Guid runId, int? tailEvents, CancellationToken ct)
+    {
+        var query = new List<string> { "timestamps=true" };
+        if (tailEvents is { } t && t > 0)
+        {
+            query.Add($"tailEvents={t}");
+        }
+
+        var url = $"{_baseUrl}/v1/runs/{runId:D}/thinking-summaries?{string.Join("&", query)}";
+
+        using var res = await _http.GetAsync(url, ct);
+        var text = await res.Content.ReadAsStringAsync(ct);
+        if (!res.IsSuccessStatusCode)
+        {
+            throw new InvalidOperationException($"HTTP {(int)res.StatusCode}: {text}");
+        }
+
+        using var doc = JsonDocument.Parse(text);
+        if (!doc.RootElement.TryGetProperty("items", out var itemsEl) || itemsEl.ValueKind != JsonValueKind.Array)
+        {
+            return Array.Empty<ThinkingSummaryItem>();
+        }
+
+        var items = JsonSerializer.Deserialize<List<ThinkingSummaryItem>>(itemsEl.GetRawText(), Json) ?? new List<ThinkingSummaryItem>();
+        return items;
+    }
+
     public async IAsyncEnumerable<SseEvent> GetEventsAsync(
         Guid runId,
         bool replay,

@@ -21,6 +21,8 @@
 
 # Local app/daemon artifacts
 .local/
+.codex-d/
+**/.codex-d/
 
 # Local Docker Compose overrides
 docker-compose.override.yml

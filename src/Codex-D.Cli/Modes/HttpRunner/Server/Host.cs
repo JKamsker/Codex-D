@@ -1,4 +1,5 @@
 using System.Net;
+using System.Text;
 using System.Text.Json;
 using CodexD.HttpRunner.CodexRuntime;
 using CodexD.HttpRunner.Contracts;
@@ -463,6 +464,8 @@ public static class Host
                 return Results.NotFound(new { error = "not_found" });
             }
 
+            var timestamps = ParseBool(req.Query["timestamps"]) ?? false;
+
             var tailEvents = ParseInt(req.Query["tailEvents"]) ?? 20000;
             if (tailEvents <= 0)
             {
@@ -487,8 +490,13 @@ public static class Host
                 }
 
                 var combined = raw.Concat(pending).ToArray();
-                var summaries = ThinkingSummaries.FromRawEvents(combined);
-                return Results.Ok(new { items = summaries });
+                if (timestamps)
+                {
+                    var items = ThinkingSummaries.FromRawEventsWithTimestamps(combined);
+                    return Results.Ok(new { items = items.Select(x => new { createdAt = x.CreatedAt, text = x.Text }).ToArray() });
+                }
+
+                return Results.Ok(new { items = ThinkingSummaries.FromRawEvents(combined) });
             }
 
             var rolloutPath = CodexRolloutPathNormalizer.Normalize(record.CodexRolloutPath);
@@ -500,14 +508,25 @@ public static class Host
                     pending = pending.Skip(pending.Count - tailEvents).ToArray();
                 }
 
-                var summaries = ThinkingSummaries.FromCodexRolloutThenRawEvents(rolloutPath, pending, ct);
-                return Results.Ok(new { items = summaries });
+                if (timestamps)
+                {
+                    var items = ThinkingSummaries.FromCodexRolloutThenRawEventsWithTimestamps(rolloutPath, pending, ct);
+                    return Results.Ok(new { items = items.Select(x => new { createdAt = x.CreatedAt, text = x.Text }).ToArray() });
+                }
+
+                return Results.Ok(new { items = ThinkingSummaries.FromCodexRolloutThenRawEvents(rolloutPath, pending, ct) });
             }
 
             var snapshot = backlog.SnapshotAfter(runId, afterExclusive: null);
             if (snapshot.Count > tailEvents)
             {
                 snapshot = snapshot.Skip(snapshot.Count - tailEvents).ToArray();
+            }
+
+            if (timestamps)
+            {
+                var items = ThinkingSummaries.FromRawEventsWithTimestamps(snapshot);
+                return Results.Ok(new { items = items.Select(x => new { createdAt = x.CreatedAt, text = x.Text }).ToArray() });
             }
 
             return Results.Ok(new { items = ThinkingSummaries.FromRawEvents(snapshot) });
@@ -616,7 +635,7 @@ public static class Host
                                 await SseWriter.WriteEventAsync(
                                     ctx.Response,
                                     env.Type,
-                                    env.Data.GetRawText(),
+                                    WithCreatedAt(env.CreatedAt, env.Data),
                                     ct);
                             }
                         }
@@ -635,7 +654,7 @@ public static class Host
                                 await SseWriter.WriteEventAsync(
                                     ctx.Response,
                                     env.Type,
-                                    env.Data.GetRawText(),
+                                    WithCreatedAt(env.CreatedAt, env.Data),
                                     ct);
                             }
                         }
@@ -673,7 +692,7 @@ public static class Host
                             var gap = backlog.SnapshotAfter(runId, maxRolloutAt);
                             foreach (var env in gap)
                             {
-                                await SseWriter.WriteEventAsync(ctx.Response, env.Type, env.Data.GetRawText(), ct);
+                                await SseWriter.WriteEventAsync(ctx.Response, env.Type, WithCreatedAt(env.CreatedAt, env.Data), ct);
                                 maxGapAt = maxGapAt is null || env.CreatedAt > maxGapAt.Value ? env.CreatedAt : maxGapAt;
                             }
 
@@ -739,7 +758,7 @@ public static class Host
                         await SseWriter.WriteEventAsync(
                             ctx.Response,
                             env.Type,
-                            env.Data.GetRawText(),
+                            WithCreatedAt(env.CreatedAt, env.Data),
                             ct);
 
                         if (string.Equals(env.Type, "run.completed", StringComparison.Ordinal) ||
@@ -777,6 +796,36 @@ public static class Host
         });
 
         return app;
+    }
+
+    private static string WithCreatedAt(DateTimeOffset createdAt, JsonElement data)
+    {
+        if (data.ValueKind != JsonValueKind.Object)
+        {
+            return data.GetRawText();
+        }
+
+        if (data.TryGetProperty("createdAt", out _))
+        {
+            return data.GetRawText();
+        }
+
+        using var stream = new MemoryStream();
+        using var writer = new Utf8JsonWriter(stream);
+
+        writer.WriteStartObject();
+        writer.WriteString("createdAt", createdAt);
+
+        foreach (var prop in data.EnumerateObject())
+        {
+            writer.WritePropertyName(prop.Name);
+            prop.Value.WriteTo(writer);
+        }
+
+        writer.WriteEndObject();
+        writer.Flush();
+
+        return Encoding.UTF8.GetString(stream.ToArray());
     }
 
     private static int FindMessageOverlap(

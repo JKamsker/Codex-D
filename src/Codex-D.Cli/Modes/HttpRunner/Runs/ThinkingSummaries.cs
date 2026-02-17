@@ -7,32 +7,41 @@ namespace CodexD.HttpRunner.Runs;
 
 internal static class ThinkingSummaries
 {
-    public static IReadOnlyList<string> FromRawEvents(IReadOnlyList<RunEventEnvelope> events)
-        => BuildSummaries(rolloutPath: null, events, CancellationToken.None);
+    public static IReadOnlyList<string> FromRawEvents(IReadOnlyList<RunEventEnvelope> events) =>
+        BuildSummaryItems(rolloutPath: null, events, CancellationToken.None).Select(x => x.Text).ToArray();
 
-    public static IReadOnlyList<string> FromCodexRollout(string rolloutPath, int? _tailEvents, CancellationToken ct)
-        => BuildSummaries(rolloutPath, events: null, ct);
+    public static IReadOnlyList<string> FromCodexRollout(string rolloutPath, int? _tailEvents, CancellationToken ct) =>
+        BuildSummaryItems(rolloutPath, events: null, ct).Select(x => x.Text).ToArray();
 
     public static IReadOnlyList<string> FromCodexRolloutThenRawEvents(
         string rolloutPath,
         IReadOnlyList<RunEventEnvelope> extraEvents,
-        CancellationToken ct)
-        => BuildSummaries(rolloutPath, extraEvents, ct);
+        CancellationToken ct) =>
+        BuildSummaryItems(rolloutPath, extraEvents, ct).Select(x => x.Text).ToArray();
 
-    private static IReadOnlyList<string> BuildSummaries(
+    public static IReadOnlyList<ThinkingSummaryItem> FromRawEventsWithTimestamps(IReadOnlyList<RunEventEnvelope> events) =>
+        BuildSummaryItems(rolloutPath: null, events, CancellationToken.None);
+
+    public static IReadOnlyList<ThinkingSummaryItem> FromCodexRolloutThenRawEventsWithTimestamps(
+        string rolloutPath,
+        IReadOnlyList<RunEventEnvelope> extraEvents,
+        CancellationToken ct) =>
+        BuildSummaryItems(rolloutPath, extraEvents, ct);
+
+    private static IReadOnlyList<ThinkingSummaryItem> BuildSummaryItems(
         string? rolloutPath,
         IReadOnlyList<RunEventEnvelope>? events,
         CancellationToken ct)
     {
-        var summaries = new List<string>();
+        var summaries = new List<ThinkingSummaryItem>();
         var last = string.Empty;
         var inThinking = false;
 
         if (!string.IsNullOrWhiteSpace(rolloutPath))
         {
-            foreach (var delta in ReadOutputDeltasFromCodexRollout(rolloutPath, ct))
+            foreach (var (createdAt, delta) in ReadOutputDeltaEventsFromCodexRollout(rolloutPath, ct))
             {
-                AddSummariesFromDelta(delta, summaries, ref last, ref inThinking);
+                AddSummariesFromDelta(createdAt, delta, summaries, ref last, ref inThinking);
             }
         }
 
@@ -51,14 +60,19 @@ internal static class ThinkingSummaries
                     continue;
                 }
 
-                AddSummariesFromDelta(delta, summaries, ref last, ref inThinking);
+                AddSummariesFromDelta(env.CreatedAt, delta, summaries, ref last, ref inThinking);
             }
         }
 
         return summaries;
     }
 
-    private static void AddSummariesFromDelta(string delta, List<string> summaries, ref string last, ref bool inThinking)
+    private static void AddSummariesFromDelta(
+        DateTimeOffset createdAt,
+        string delta,
+        List<ThinkingSummaryItem> summaries,
+        ref string last,
+        ref bool inThinking)
     {
         var trimmed = delta.Trim();
         if (string.Equals(trimmed, "thinking", StringComparison.OrdinalIgnoreCase))
@@ -98,14 +112,14 @@ internal static class ThinkingSummaries
                 continue;
             }
 
-            summaries.Add(summary);
+            summaries.Add(new ThinkingSummaryItem { CreatedAt = createdAt, Text = summary });
             last = summary;
         }
     }
 
-    private static IReadOnlyList<string> ReadOutputDeltasFromCodexRollout(string rolloutPath, CancellationToken ct)
+    private static IReadOnlyList<(DateTimeOffset CreatedAt, string Delta)> ReadOutputDeltaEventsFromCodexRollout(string rolloutPath, CancellationToken ct)
     {
-        var deltas = new List<string>();
+        var deltas = new List<(DateTimeOffset CreatedAt, string Delta)>();
         if (string.IsNullOrWhiteSpace(rolloutPath) || !File.Exists(rolloutPath))
         {
             return deltas;
@@ -129,6 +143,11 @@ internal static class ThinkingSummaries
                 using var doc = JsonDocument.Parse(line);
                 var root = doc.RootElement;
                 if (root.ValueKind != JsonValueKind.Object)
+                {
+                    continue;
+                }
+
+                if (!TryGetTimestamp(root, out var createdAt))
                 {
                     continue;
                 }
@@ -159,7 +178,7 @@ internal static class ThinkingSummaries
                     var delta = TryDecodeBase64Chunk(payload) ?? TryGetString(payload, "delta");
                     if (!string.IsNullOrEmpty(delta))
                     {
-                        deltas.Add(delta);
+                        deltas.Add((createdAt, delta));
                     }
                 }
                 else if (string.Equals(type, "response_item", StringComparison.Ordinal))
@@ -182,7 +201,7 @@ internal static class ThinkingSummaries
                     var output = outputEl.GetString();
                     if (!string.IsNullOrEmpty(output))
                     {
-                        deltas.Add(output);
+                        deltas.Add((createdAt, output));
                     }
                 }
             }
@@ -228,5 +247,27 @@ internal static class ThinkingSummaries
 
         var s = el.GetString();
         return string.IsNullOrWhiteSpace(s) ? null : s;
+    }
+
+    private static bool TryGetTimestamp(JsonElement root, out DateTimeOffset ts)
+    {
+        ts = default;
+
+        if (!root.TryGetProperty("timestamp", out var tsEl) || tsEl.ValueKind != JsonValueKind.String)
+        {
+            return false;
+        }
+
+        var raw = tsEl.GetString();
+        if (string.IsNullOrWhiteSpace(raw))
+        {
+            return false;
+        }
+
+        return DateTimeOffset.TryParse(
+            raw,
+            CultureInfo.InvariantCulture,
+            DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal,
+            out ts);
     }
 }

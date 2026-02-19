@@ -239,14 +239,60 @@ public static class Host
                 }
 
                 var review = request.Review;
-                if (!review.Uncommitted &&
-                    string.IsNullOrWhiteSpace(review.CommitSha) &&
-                    string.IsNullOrWhiteSpace(review.BaseBranch))
+                var prompt = request.Prompt ?? string.Empty;
+
+                static string NormalizeReviewMode(string? raw)
                 {
-                    review = review with { Uncommitted = true };
+                    raw = raw?.Trim();
+                    if (string.IsNullOrWhiteSpace(raw))
+                    {
+                        return "exec";
+                    }
+
+                    return raw.Equals("appserver", StringComparison.OrdinalIgnoreCase) ||
+                           raw.Equals("app-server", StringComparison.OrdinalIgnoreCase)
+                        ? "appserver"
+                        : "exec";
                 }
 
-                request = request with { Kind = kind, Review = review, Prompt = request.Prompt ?? string.Empty };
+                var normalizedMode = NormalizeReviewMode(review.Mode);
+                var hasPrompt = !string.IsNullOrWhiteSpace(prompt);
+                var hasTarget =
+                    review.Uncommitted ||
+                    !string.IsNullOrWhiteSpace(review.CommitSha) ||
+                    !string.IsNullOrWhiteSpace(review.BaseBranch);
+                var sandbox = string.IsNullOrWhiteSpace(request.Sandbox) ? null : request.Sandbox.Trim();
+
+                // Default scope:
+                // - exec-mode: when a prompt is provided without scope, upstream codex treats it as the target (custom instructions).
+                // - appserver-mode: prompt is developer instructions, so default to uncommitted changes when no explicit scope is provided.
+                if (!hasTarget && (!hasPrompt || normalizedMode == "appserver"))
+                {
+                    review = review with { Uncommitted = true };
+                    hasTarget = true;
+                }
+
+                // Upstream `codex review` cannot combine scope selection with a prompt; treat prompt as developer instructions instead.
+                if (normalizedMode == "exec" && hasPrompt && hasTarget)
+                {
+                    if (review.AdditionalOptions is { Length: > 0 })
+                    {
+                        throw new ArgumentException(
+                            "In exec-mode, `codex review` cannot combine --uncommitted/--base/--commit with a custom PROMPT. " +
+                            "Remove exec-only extra args (AdditionalOptions) or switch this review to appserver-mode.");
+                    }
+
+                    review = review with { Mode = "appserver" };
+                    normalizedMode = "appserver";
+                }
+
+                // Default sandbox for app-server reviews to read-only (unless explicitly overridden).
+                if (sandbox is null && normalizedMode == "appserver")
+                {
+                    sandbox = "read-only";
+                }
+
+                request = request with { Kind = kind, Review = review, Prompt = prompt, Sandbox = sandbox };
             }
 
             try

@@ -106,6 +106,14 @@ Review a specific commit:
 codex-d http review --commit <SHA>
 ```
 
+Targeted review (scope + custom instructions):
+
+```bash
+codex-d http review --base <REF> --prompt "Review for parity vs 4Story…"
+```
+
+Note: upstream `codex review` (exec-mode) treats `PROMPT` as a mutually-exclusive target selector, so `codex-d` will run prompt+scope reviews via app-server mode to preserve both.
+
 Detach (run continues on server after your terminal exits):
 
 ```bash

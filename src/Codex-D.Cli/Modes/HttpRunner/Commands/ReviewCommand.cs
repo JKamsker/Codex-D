@@ -22,11 +22,11 @@ public sealed class ReviewCommand : AsyncCommand<ReviewCommand.Settings>
         public string? Delivery { get; init; }
 
         [CommandOption("-p|--prompt <PROMPT>")]
-        [Description("Optional custom review instructions. Use '-' to read stdin.")]
+        [Description("Optional review prompt. In exec-mode this becomes a custom review target (mutually exclusive with --base/--commit/--uncommitted). In appserver-mode it becomes developer instructions (can be combined with scope). Use '-' to read stdin.")]
         public string? PromptOption { get; init; }
 
         [CommandArgument(0, "[PROMPT]")]
-        [Description("Optional custom review instructions. Use '-' to read stdin.")]
+        [Description("Optional review prompt. In exec-mode this becomes a custom review target (mutually exclusive with --base/--commit/--uncommitted). In appserver-mode it becomes developer instructions (can be combined with scope). Use '-' to read stdin.")]
         public string[] Prompt { get; init; } = [];
 
         [CommandOption("-d|--detach")]
@@ -54,8 +54,12 @@ public sealed class ReviewCommand : AsyncCommand<ReviewCommand.Settings>
         public string? Model { get; init; }
 
         [CommandOption("-r|--reasoning|--effort|--reasoning-effort <EFFORT>")]
-        [Description("Reasoning effort override (exec-mode only). Examples: none, minimal, low, medium, high, xhigh.")]
+        [Description("Reasoning effort override. Examples: none, minimal, low, medium, high, xhigh.")]
         public string? Effort { get; init; }
+
+        [CommandOption("--sandbox <MODE>")]
+        [Description("Sandbox mode (primarily affects app-server mode). Examples: read-only, workspace-write, danger-full-access.")]
+        public string? Sandbox { get; init; }
 
         [CommandOption("-c|--config <KEY=VALUE>")]
         [Description("Forward a `--config <key=value>` option to `codex review` (repeatable).")]
@@ -134,33 +138,49 @@ public sealed class ReviewCommand : AsyncCommand<ReviewCommand.Settings>
 
             var baseBranch = StringHelpers.TrimOrNull(settings.BaseBranch);
             var commitSha = StringHelpers.TrimOrNull(settings.CommitSha);
+            var hasPrompt = !string.IsNullOrWhiteSpace(prompt);
             var uncommitted = settings.Uncommitted;
 
-            var targets = 0;
-            if (uncommitted) targets++;
-            if (!string.IsNullOrWhiteSpace(baseBranch)) targets++;
-            if (!string.IsNullOrWhiteSpace(commitSha)) targets++;
+            var explicitTargets = 0;
+            if (uncommitted) explicitTargets++;
+            if (!string.IsNullOrWhiteSpace(baseBranch)) explicitTargets++;
+            if (!string.IsNullOrWhiteSpace(commitSha)) explicitTargets++;
 
-            if (targets == 0)
-            {
-                uncommitted = true;
-            }
-
-            if (targets > 1)
+            if (explicitTargets > 1)
             {
                 throw new ArgumentException("Only one of --uncommitted, --base, or --commit can be specified.");
             }
 
-            if (string.Equals(mode, "appserver", StringComparison.OrdinalIgnoreCase))
+            var autoSwitchedToAppServer = false;
+            if (string.Equals(mode, "exec", StringComparison.OrdinalIgnoreCase) && hasPrompt && explicitTargets > 0)
             {
-                if (!string.IsNullOrWhiteSpace(settings.Effort))
+                if (settings.Config.Length > 0 || settings.Enable.Length > 0 || settings.Disable.Length > 0 || settings.Arg.Length > 0)
                 {
-                    throw new ArgumentException("-r/--reasoning is only supported with --mode exec.");
+                    throw new ArgumentException(
+                        "In exec-mode, `codex review` cannot combine --uncommitted/--base/--commit with a custom PROMPT. " +
+                        "Use --mode appserver for prompt+scope reviews (note: --config/--enable/--disable/--arg are exec-only).");
                 }
 
+                mode = "appserver";
+                autoSwitchedToAppServer = true;
+            }
+
+            if (string.Equals(mode, "appserver", StringComparison.OrdinalIgnoreCase))
+            {
                 if (settings.Config.Length > 0 || settings.Enable.Length > 0 || settings.Disable.Length > 0 || settings.Arg.Length > 0)
                 {
                     throw new ArgumentException("--config/--enable/--disable/--arg are only supported with --mode exec.");
+                }
+            }
+
+            if (explicitTargets == 0)
+            {
+                // Default review target differs by mode:
+                // - exec: when a prompt is provided, upstream codex treats it as the target (custom instructions), so we must not default --uncommitted.
+                // - appserver: prompt is developer instructions, so default to --uncommitted when no explicit scope is provided.
+                if (!hasPrompt || string.Equals(mode, "appserver", StringComparison.OrdinalIgnoreCase))
+                {
+                    uncommitted = true;
                 }
             }
 
@@ -185,6 +205,7 @@ public sealed class ReviewCommand : AsyncCommand<ReviewCommand.Settings>
                 Review = review,
                 Model = StringHelpers.TrimOrNull(settings.Model),
                 Effort = StringHelpers.TrimOrNull(settings.Effort),
+                Sandbox = StringHelpers.TrimOrNull(settings.Sandbox),
                 ApprovalPolicy = string.IsNullOrWhiteSpace(settings.ApprovalPolicy) ? "never" : settings.ApprovalPolicy.Trim()
             };
 
@@ -198,6 +219,10 @@ public sealed class ReviewCommand : AsyncCommand<ReviewCommand.Settings>
             }
             else
             {
+                if (autoSwitchedToAppServer)
+                {
+                    AnsiConsole.MarkupLine("[yellow]Note:[/] prompt+scope is not supported by `codex review` (exec-mode); running this review via app-server to preserve both.");
+                }
                 AnsiConsole.MarkupLine($"RunId: [cyan]{created.RunId:D}[/]  Status: [grey]{created.Status}[/]");
             }
 

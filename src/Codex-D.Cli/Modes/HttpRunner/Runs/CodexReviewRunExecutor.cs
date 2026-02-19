@@ -30,6 +30,44 @@ public sealed class CodexReviewRunExecutor : IRunExecutor
         var review = context.Review ?? new RunReviewRequest { Uncommitted = true, Mode = "exec" };
         var mode = NormalizeMode(review.Mode);
 
+        var prompt = (context.Prompt ?? string.Empty).Trim();
+        var hasPrompt = !string.IsNullOrWhiteSpace(prompt);
+        var hasTarget =
+            review.Uncommitted ||
+            !string.IsNullOrWhiteSpace(review.BaseBranch) ||
+            !string.IsNullOrWhiteSpace(review.CommitSha);
+
+        // Upstream `codex review` treats PROMPT as a mutually-exclusive target selector (custom instructions),
+        // so prompt+scope is invalid in exec-mode. Route to app-server so we can preserve both:
+        // - scope becomes the review target
+        // - prompt becomes developer instructions on the thread
+        if (mode == ReviewExecutionMode.Exec && hasPrompt && hasTarget)
+        {
+            if (review.AdditionalOptions is { Length: > 0 })
+            {
+                return new RunExecutionResult
+                {
+                    Status = RunStatuses.Failed,
+                    Error =
+                        "prompt+scope reviews are not supported by `codex review` (exec-mode), and this run also included exec-only extra args. " +
+                        "Remove AdditionalOptions / --config / --enable / --disable / --arg, or use review.mode=appserver."
+                };
+            }
+
+            await context.PublishNotificationAsync(
+                "item/agentMessage/delta",
+                JsonSerializer.SerializeToElement(
+                    new
+                    {
+                        delta =
+                            "Note: prompt+scope is not supported by `codex review` (exec-mode); running this review via app-server to preserve both.\n"
+                    },
+                    Json),
+                ct);
+
+            return await ExecuteAppServerAsync(context, review with { Mode = "appserver" }, ct);
+        }
+
         return mode switch
         {
             ReviewExecutionMode.AppServer => await ExecuteAppServerAsync(context, review, ct),
@@ -146,6 +184,12 @@ public sealed class CodexReviewRunExecutor : IRunExecutor
         await using var client = await _appServer.StartAsync(ct);
 
         var instructions = string.IsNullOrWhiteSpace(context.Prompt) ? null : context.Prompt.Trim();
+        var effortValue = string.IsNullOrWhiteSpace(context.Effort) ? null : context.Effort.Trim();
+        JsonElement? threadConfig = null;
+        if (!string.IsNullOrWhiteSpace(effortValue))
+        {
+            threadConfig = JsonSerializer.SerializeToElement(new { model_reasoning_effort = effortValue }, Json);
+        }
 
         var thread = await client.StartThreadAsync(
             new ThreadStartOptions
@@ -155,6 +199,7 @@ public sealed class CodexReviewRunExecutor : IRunExecutor
                 Sandbox = sandbox,
                 ApprovalPolicy = approvalPolicy,
                 Ephemeral = false,
+                Config = threadConfig,
                 DeveloperInstructions = instructions
             },
             ct);

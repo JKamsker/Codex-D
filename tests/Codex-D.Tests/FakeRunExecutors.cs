@@ -107,6 +107,37 @@ internal sealed class InterruptThrowsBlockingExecutor : IRunExecutor
     }
 }
 
+internal sealed class MissingRolloutPathWithSiblingExecutor : IRunExecutor
+{
+    public string? ExpectedRolloutPath { get; private set; }
+    public string? ActualRolloutPath { get; private set; }
+
+    public async Task<RunExecutionResult> ExecuteAsync(RunExecutionContext context, CancellationToken ct)
+    {
+        context.SetInterrupt(_ => Task.CompletedTask);
+
+        var dir = Path.Combine(context.Cwd, "rollouts");
+        Directory.CreateDirectory(dir);
+
+        const string ts = "2026-02-19T00-00-00";
+        ExpectedRolloutPath = Path.Combine(dir, $"rollout-{ts}-expected.jsonl");
+        ActualRolloutPath = Path.Combine(dir, $"rollout-{ts}-actual.jsonl");
+
+        // Create a sibling rollout file matching the same timestamp prefix, but do not create the expected path.
+        File.WriteAllText(ActualRolloutPath, "{\"ok\":true}\n");
+
+        await context.SetCodexIdsAsync("thread-test", "turn-test", ExpectedRolloutPath, ct);
+
+        // Publish a notification to trigger the runner's rollout path resolution logic.
+        await context.PublishNotificationAsync(
+            "item/commandExecution/outputDelta",
+            JsonSerializer.SerializeToElement(new { delta = "hi\n" }),
+            ct);
+
+        return new RunExecutionResult { Status = RunStatuses.Succeeded, Error = null };
+    }
+}
+
 internal sealed class MessagesAndThinkingExecutor : IRunExecutor
 {
     public async Task<RunExecutionResult> ExecuteAsync(RunExecutionContext context, CancellationToken ct)

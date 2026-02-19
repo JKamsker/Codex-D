@@ -144,6 +144,29 @@ public sealed class RunnerHttpServerTests
     }
 
     [Fact]
+    public async Task Runs_Get_ResolvesRolloutPathToExistingSiblingFile()
+    {
+        var exec = new MissingRolloutPathWithSiblingExecutor();
+        await using var host = await RunnerHttpTestHost.StartAsync(requireAuth: false, exec);
+        using var sdk = host.CreateSdkClient(includeToken: false);
+
+        var cwd = Path.Combine(host.StateDir, "repo");
+        Directory.CreateDirectory(cwd);
+
+        var created = await sdk.CreateRunAsync(new CreateRunRequest { Cwd = cwd, Prompt = "hi", Model = null, Sandbox = null, ApprovalPolicy = "never" }, CancellationToken.None);
+        var runId = created.RunId;
+
+        await WaitForTerminalAsync(sdk, runId, TimeSpan.FromSeconds(2));
+
+        var run = await sdk.GetRunAsync(runId, CancellationToken.None);
+        Assert.NotNull(exec.ExpectedRolloutPath);
+        Assert.NotNull(exec.ActualRolloutPath);
+        Assert.False(File.Exists(exec.ExpectedRolloutPath));
+        Assert.True(File.Exists(exec.ActualRolloutPath));
+        Assert.Equal(exec.ActualRolloutPath, run.CodexRolloutPath);
+    }
+
+    [Fact]
     public async Task Runs_Create_ReturnsBadRequest_WhenCwdDoesNotExist()
     {
         await using var host = await RunnerHttpTestHost.StartAsync(requireAuth: false, new ImmediateSuccessExecutor());

@@ -10,4 +10,5 @@ Goal: Start the new daemon, run a detached review (`--base` + `--prompt`), find 
 - [ ] Stop the review (`codex-d run stop <runId>`) and confirm it transitions to `paused`
 - [ ] Verify rollup JSONL contains the exact `--prompt` text and base SHA
 - [x] Fix: `run stop` should succeed even if the executor’s interrupt handler throws
+- [x] Fix: resolve non-existent `codexRolloutPath` to an existing sibling JSONL
 - [ ] If missing, fix the rollout metadata capture + add/adjust tests

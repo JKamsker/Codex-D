@@ -324,6 +324,7 @@ public sealed class RunManager
 
         var runId = record.RunId;
         DateTimeOffset? lastNotificationAt = record.CodexLastNotificationAt;
+        var lastRolloutResolveAt = DateTimeOffset.MinValue;
         try
         {
             var now = DateTimeOffset.UtcNow;
@@ -331,10 +332,56 @@ public sealed class RunManager
             await _store.UpdateAsync(runId, record, runCts.Token);
             await AppendAndPublishAsync(runId, "run.meta", record, runCts.Token);
 
+            async Task MaybeResolveRolloutPathAsync(CancellationToken ct)
+            {
+                var current = CodexRolloutPathNormalizer.Normalize(record.CodexRolloutPath);
+                if (string.IsNullOrWhiteSpace(current) || File.Exists(current))
+                {
+                    return;
+                }
+
+                var resolveInterval = TimeSpan.FromSeconds(1);
+                var now = DateTimeOffset.UtcNow;
+                if (lastRolloutResolveAt != DateTimeOffset.MinValue && now - lastRolloutResolveAt < resolveInterval)
+                {
+                    return;
+                }
+
+                lastRolloutResolveAt = now;
+
+                var resolved = TryResolveSiblingRolloutPath(current);
+                if (string.IsNullOrWhiteSpace(resolved) || string.Equals(resolved, current, StringComparison.Ordinal))
+                {
+                    return;
+                }
+
+                record = record with { CodexRolloutPath = resolved };
+                await _store.UpdateAsync(runId, record, ct);
+                await AppendAndPublishAsync(runId, "run.meta", record, ct);
+                _backlog.SetRolloutPath(runId, record.CodexRolloutPath);
+            }
+
             Task PublishNotificationAsync(string method, JsonElement @params, CancellationToken ct)
             {
                 lastNotificationAt = DateTimeOffset.UtcNow;
-                return AppendAndPublishAsync(runId, "codex.notification", new { method, @params }, ct);
+                return PublishAndMaybeResolveAsync(method, @params, ct);
+
+                async Task PublishAndMaybeResolveAsync(string method, JsonElement @params, CancellationToken ct)
+                {
+                    await AppendAndPublishAsync(runId, "codex.notification", new { method, @params }, ct);
+                    try
+                    {
+                        await MaybeResolveRolloutPathAsync(ct);
+                    }
+                    catch (OperationCanceledException) when (ct.IsCancellationRequested)
+                    {
+                        // ignore
+                    }
+                    catch
+                    {
+                        // ignore
+                    }
+                }
             }
 
             async Task SetCodexIdsAsync(string threadId, string? turnId, string? rolloutPath, CancellationToken ct)
@@ -352,6 +399,19 @@ public sealed class RunManager
                 await AppendAndPublishAsync(runId, "run.meta", record, ct);
 
                 _backlog.SetRolloutPath(runId, record.CodexRolloutPath);
+
+                try
+                {
+                    await MaybeResolveRolloutPathAsync(ct);
+                }
+                catch (OperationCanceledException) when (ct.IsCancellationRequested)
+                {
+                    // ignore
+                }
+                catch
+                {
+                    // ignore
+                }
             }
 
             void SetInterrupt(Func<CancellationToken, Task> interrupt) => active.InterruptInner = interrupt;
@@ -405,6 +465,19 @@ public sealed class RunManager
                 await _store.UpdateAsync(runId, paused, CancellationToken.None);
                 await AppendAndPublishAsync(runId, "run.paused", paused, CancellationToken.None);
                 return;
+            }
+
+            try
+            {
+                await MaybeResolveRolloutPathAsync(runCts.Token);
+            }
+            catch (OperationCanceledException) when (runCts.Token.IsCancellationRequested)
+            {
+                // ignore
+            }
+            catch
+            {
+                // ignore
             }
 
             var completed = record with
@@ -479,6 +552,118 @@ public sealed class RunManager
             "This is a continuation of the review process. The user has prompted the following message:\n\n" +
             prompt +
             "\n";
+    }
+
+    private static string? TryResolveSiblingRolloutPath(string expectedPath)
+    {
+        if (string.IsNullOrWhiteSpace(expectedPath))
+        {
+            return null;
+        }
+
+        expectedPath = expectedPath.Trim();
+        if (expectedPath.Length == 0)
+        {
+            return null;
+        }
+
+        string? dir;
+        string fileName;
+        try
+        {
+            dir = Path.GetDirectoryName(expectedPath);
+            fileName = Path.GetFileName(expectedPath);
+        }
+        catch
+        {
+            return null;
+        }
+
+        if (string.IsNullOrWhiteSpace(dir) || string.IsNullOrWhiteSpace(fileName) || !Directory.Exists(dir))
+        {
+            return null;
+        }
+
+        const string start = "rollout-";
+        const int timestampLen = 19; // yyyy-MM-ddTHH-mm-ss
+        var expectedPrefixLen = start.Length + timestampLen + 1; // include trailing '-'
+
+        if (fileName.Length < expectedPrefixLen || !fileName.StartsWith(start, StringComparison.OrdinalIgnoreCase))
+        {
+            return null;
+        }
+
+        if (fileName[expectedPrefixLen - 1] != '-')
+        {
+            return null;
+        }
+
+        var prefix = fileName[..expectedPrefixLen];
+
+        string? bestPath = null;
+        long bestLen = -1;
+        DateTime bestWriteUtc = DateTime.MinValue;
+        var hasNonZero = false;
+
+        try
+        {
+            foreach (var candidate in Directory.EnumerateFiles(dir, prefix + "*.jsonl"))
+            {
+                FileInfo info;
+                try
+                {
+                    info = new FileInfo(candidate);
+                    if (!info.Exists)
+                    {
+                        continue;
+                    }
+                }
+                catch
+                {
+                    continue;
+                }
+
+                var len = info.Length;
+                var write = info.LastWriteTimeUtc;
+                var nonZero = len > 0;
+
+                if (bestPath is null)
+                {
+                    bestPath = info.FullName;
+                    bestLen = len;
+                    bestWriteUtc = write;
+                    hasNonZero = nonZero;
+                    continue;
+                }
+
+                if (hasNonZero && !nonZero)
+                {
+                    continue;
+                }
+
+                if (!hasNonZero && nonZero)
+                {
+                    bestPath = info.FullName;
+                    bestLen = len;
+                    bestWriteUtc = write;
+                    hasNonZero = true;
+                    continue;
+                }
+
+                if (len > bestLen || (len == bestLen && write > bestWriteUtc))
+                {
+                    bestPath = info.FullName;
+                    bestLen = len;
+                    bestWriteUtc = write;
+                }
+            }
+        }
+        catch
+        {
+            return null;
+        }
+
+        return bestPath;
     }
 
     private async Task AppendAndPublishAsync<T>(Guid runId, string type, T data, CancellationToken ct)

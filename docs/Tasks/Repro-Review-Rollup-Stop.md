@@ -7,8 +7,8 @@ Goal: Start the new daemon, run a detached review (`--base` + `--prompt`), find 
 - [x] Start detached review (`codex-d review --base <sha> -d --prompt "<text>"`)
 - [x] Wait ~10 seconds and confirm run is `running`
 - [x] Locate the run’s `run.json` and its `codexRolloutPath`
-- [ ] Stop the review (`codex-d run stop <runId>`) and confirm it transitions to `paused`
-- [ ] Verify rollup JSONL contains the exact `--prompt` text and base SHA
+- [x] Stop the review (`codex-d run stop <runId>`) and confirm it transitions to `paused`
+- [x] Verify rollup JSONL contains the exact `--prompt` text and base SHA
 - [x] Fix: `run stop` should succeed even if the executor’s interrupt handler throws
 - [x] Fix: resolve non-existent `codexRolloutPath` to an existing sibling JSONL
-- [ ] If missing, fix the rollout metadata capture + add/adjust tests
+- [x] If missing, fix the rollout metadata capture + add/adjust tests

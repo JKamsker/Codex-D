@@ -89,6 +89,24 @@ internal sealed class NonInterruptibleBlockingExecutor : IRunExecutor
     }
 }
 
+internal sealed class InterruptThrowsBlockingExecutor : IRunExecutor
+{
+    public TaskCompletionSource Started { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+    public async Task<RunExecutionResult> ExecuteAsync(RunExecutionContext context, CancellationToken ct)
+    {
+        context.SetInterrupt(_ => throw new InvalidOperationException("boom"));
+
+        var rolloutPath = TestCodexRollout.EnsureInitialized(context.Cwd);
+        await context.SetCodexIdsAsync("thread-test", "turn-test", rolloutPath, ct);
+
+        Started.TrySetResult();
+
+        await Task.Delay(Timeout.InfiniteTimeSpan, ct);
+        return new RunExecutionResult { Status = RunStatuses.Succeeded, Error = null };
+    }
+}
+
 internal sealed class MessagesAndThinkingExecutor : IRunExecutor
 {
     public async Task<RunExecutionResult> ExecuteAsync(RunExecutionContext context, CancellationToken ct)

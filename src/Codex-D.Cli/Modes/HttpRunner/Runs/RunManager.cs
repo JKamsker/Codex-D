@@ -78,22 +78,22 @@ public sealed class RunManager
             return false;
         }
 
-        try
+        var inner = active.InterruptInner;
+        if (inner is not null)
         {
-            var inner = active.InterruptInner;
-            if (inner is not null)
+            try
             {
                 await inner(ct);
             }
+            catch (Exception ex)
+            {
+                // Still cancel our local execution even if the underlying runtime interrupt call fails.
+                _logger.LogWarning(ex, "Run interrupt handler failed. runId={RunId}", runId);
+            }
+        }
 
-            try { active.InterruptCts.Cancel(); } catch { }
-            return true;
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex, "Failed to interrupt run. runId={RunId}", runId);
-            return false;
-        }
+        try { active.InterruptCts.Cancel(); } catch { }
+        return true;
     }
 
     public async Task<bool> TryStopAsync(Guid runId, CancellationToken ct)

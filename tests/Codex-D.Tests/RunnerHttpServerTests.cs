@@ -319,6 +319,38 @@ public sealed class RunnerHttpServerTests
     }
 
     [Fact]
+    public async Task Stop_WorksWhenInterruptHandlerThrows()
+    {
+        var exec = new InterruptThrowsBlockingExecutor();
+        await using var host = await RunnerHttpTestHost.StartAsync(requireAuth: false, exec);
+        using var sdk = host.CreateSdkClient(includeToken: false);
+
+        var cwd = Path.Combine(host.StateDir, "repo");
+        Directory.CreateDirectory(cwd);
+
+        var created = await sdk.CreateRunAsync(new CreateRunRequest
+        {
+            Cwd = cwd,
+            Prompt = "hi",
+            Kind = RunKinds.Review,
+            Review = new RunReviewRequest { Uncommitted = true, Mode = "exec" },
+            Model = null,
+            Sandbox = null,
+            ApprovalPolicy = "never"
+        }, CancellationToken.None);
+        var runId = created.RunId;
+
+        await exec.Started.Task;
+
+        await sdk.StopAsync(runId, CancellationToken.None);
+        await WaitForEventAsync(sdk, runId, "run.paused", TimeSpan.FromSeconds(5));
+
+        var run = await sdk.GetRunAsync(runId, CancellationToken.None);
+        Assert.Equal(RunStatuses.Paused, run.Status);
+        Assert.Equal(RunKinds.Review, RunKinds.Normalize(run.Kind));
+    }
+
+    [Fact]
     public async Task Resume_RestartsExecution_AndCompletes()
     {
         var exec = new StopThenSucceedExecutor();

@@ -295,6 +295,42 @@ public sealed class RunnerHttpServerTests
     }
 
     [Fact]
+    public async Task Resume_ReviewRun_ContinuesAsExecTurn_WithContinuationPrefix()
+    {
+        var exec = new StopThenCaptureContinuationExecutor();
+        await using var host = await RunnerHttpTestHost.StartAsync(requireAuth: false, exec);
+        using var sdk = host.CreateSdkClient(includeToken: false);
+
+        var cwd = Path.Combine(host.StateDir, "repo");
+        Directory.CreateDirectory(cwd);
+
+        var created = await sdk.CreateRunAsync(new CreateRunRequest
+        {
+            Cwd = cwd,
+            Prompt = "hi",
+            Kind = RunKinds.Review,
+            Review = new RunReviewRequest { Uncommitted = true, Mode = "exec" },
+            Model = null,
+            Sandbox = null,
+            ApprovalPolicy = "never"
+        }, CancellationToken.None);
+        var runId = created.RunId;
+
+        await exec.FirstStarted.Task;
+
+        await sdk.StopAsync(runId, CancellationToken.None);
+        await WaitForEventAsync(sdk, runId, "run.paused", TimeSpan.FromSeconds(5));
+
+        const string resumePrompt = "please continue";
+        await sdk.ResumeAsync(runId, prompt: resumePrompt, CancellationToken.None);
+        await exec.SecondStarted.Task;
+
+        Assert.Equal(RunKinds.Exec, exec.SecondKind);
+        Assert.Contains("continuation of the review process", exec.SecondPrompt, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains(resumePrompt, exec.SecondPrompt, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task Sse_RawReplay_DoesNotTreatHistoricalRunPausedAsTerminalAfterResume()
     {
         var exec = new StopThenBlockThenSucceedExecutor();

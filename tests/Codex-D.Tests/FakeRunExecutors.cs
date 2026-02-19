@@ -383,6 +383,77 @@ internal sealed class StopThenSucceedExecutor : IRunExecutor
     }
 }
 
+internal sealed class StopThenCaptureContinuationExecutor : IRunExecutor
+{
+    private readonly object _lock = new();
+    private readonly Dictionary<Guid, int> _attempts = new();
+
+    public TaskCompletionSource FirstStarted { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    public TaskCompletionSource SecondStarted { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+    public string? SecondKind { get; private set; }
+    public string? SecondPrompt { get; private set; }
+
+    public async Task<RunExecutionResult> ExecuteAsync(RunExecutionContext context, CancellationToken ct)
+    {
+        var attempt = IncrementAttempt(context.RunId);
+        var rolloutPath = TestCodexRollout.EnsureInitialized(context.Cwd);
+
+        if (attempt == 1)
+        {
+            var interrupted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            context.SetInterrupt(_ =>
+            {
+                interrupted.TrySetResult();
+                return Task.CompletedTask;
+            });
+
+            await context.SetCodexIdsAsync("019c75dd-71bb-7e60-9091-227568dcc8fa", "turn-test", rolloutPath, ct);
+
+            TestCodexRollout.AppendExecCommandOutputDelta(rolloutPath, "phase1\n");
+            await context.PublishNotificationAsync(
+                "item/commandExecution/outputDelta",
+                JsonSerializer.SerializeToElement(new { delta = "phase1\n" }),
+                ct);
+
+            FirstStarted.TrySetResult();
+
+            await interrupted.Task.WaitAsync(ct);
+            return new RunExecutionResult { Status = RunStatuses.Interrupted, Error = null };
+        }
+
+        context.SetInterrupt(_ => Task.CompletedTask);
+        await context.SetCodexIdsAsync("019c75dd-71bb-7e60-9091-227568dcc8fa", $"turn-test-{attempt}", rolloutPath, ct);
+
+        SecondKind = RunKinds.Normalize(context.Kind);
+        SecondPrompt = context.Prompt;
+        SecondStarted.TrySetResult();
+
+        TestCodexRollout.AppendExecCommandOutputDelta(rolloutPath, "phase2\n");
+        await context.PublishNotificationAsync(
+            "item/commandExecution/outputDelta",
+            JsonSerializer.SerializeToElement(new { delta = "phase2\n" }),
+            ct);
+
+        return new RunExecutionResult { Status = RunStatuses.Succeeded, Error = null };
+    }
+
+    private int IncrementAttempt(Guid runId)
+    {
+        lock (_lock)
+        {
+            if (!_attempts.TryGetValue(runId, out var current))
+            {
+                current = 0;
+            }
+
+            current++;
+            _attempts[runId] = current;
+            return current;
+        }
+    }
+}
+
 internal sealed class StopThenBlockThenSucceedExecutor : IRunExecutor
 {
     private readonly object _lock = new();

@@ -66,7 +66,7 @@ public sealed class RunManager
             return record;
         }
 
-        _ = Task.Run(() => ExecuteAsync(active, record, request.Prompt, _appStopping), CancellationToken.None);
+        _ = Task.Run(() => ExecuteAsync(active, record, request.Prompt, kindOverride: null, reviewOverride: null, _appStopping), CancellationToken.None);
 
         return record;
     }
@@ -152,7 +152,7 @@ public sealed class RunManager
         }
 
         var kind = RunKinds.Normalize(record.Kind);
-        if (kind != RunKinds.Exec)
+        if (kind is not (RunKinds.Exec or RunKinds.Review))
         {
             return null;
         }
@@ -184,7 +184,22 @@ public sealed class RunManager
             throw;
         }
 
-        _ = Task.Run(() => ExecuteAsync(active, queued, prompt, _appStopping), CancellationToken.None);
+        var effectivePrompt = prompt;
+        string? kindOverride = null;
+        RunReviewRequest? reviewOverride = null;
+
+        if (kind == RunKinds.Review &&
+            !string.IsNullOrWhiteSpace(queued.CodexThreadId) &&
+            Guid.TryParse(queued.CodexThreadId, out _))
+        {
+            kindOverride = RunKinds.Exec;
+            reviewOverride = null;
+            effectivePrompt = BuildReviewContinuationPrompt(prompt);
+        }
+
+        _ = Task.Run(
+            () => ExecuteAsync(active, queued, effectivePrompt, kindOverride, reviewOverride, _appStopping),
+            CancellationToken.None);
 
         return queued;
     }
@@ -304,7 +319,13 @@ public sealed class RunManager
         }
     }
 
-    private async Task ExecuteAsync(ActiveRun active, Run record, string prompt, CancellationToken outerCt)
+    private async Task ExecuteAsync(
+        ActiveRun active,
+        Run record,
+        string prompt,
+        string? kindOverride,
+        RunReviewRequest? reviewOverride,
+        CancellationToken outerCt)
     {
         using var runCts = CancellationTokenSource.CreateLinkedTokenSource(outerCt);
         active.Cancellation = runCts;
@@ -349,8 +370,8 @@ public sealed class RunManager
                 Cwd = record.Cwd,
                 Prompt = prompt,
                 CodexThreadId = record.CodexThreadId,
-                Kind = record.Kind,
-                Review = record.Review,
+                Kind = kindOverride ?? record.Kind,
+                Review = kindOverride is null ? record.Review : reviewOverride,
                 Model = record.Model,
                 Effort = record.Effort,
                 Sandbox = record.Sandbox,
@@ -447,6 +468,17 @@ public sealed class RunManager
         {
             _active.TryRemove(runId, out _);
         }
+    }
+
+    private static string BuildReviewContinuationPrompt(string prompt)
+    {
+        prompt ??= string.Empty;
+        prompt = prompt.Trim();
+
+        return
+            "This is a continuation of the review process. The user has prompted the following message:\n\n" +
+            prompt +
+            "\n";
     }
 
     private async Task AppendAndPublishAsync<T>(Guid runId, string type, T data, CancellationToken ct)

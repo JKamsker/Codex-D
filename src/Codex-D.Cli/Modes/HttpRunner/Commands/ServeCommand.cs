@@ -365,7 +365,6 @@ public sealed class ServeCommand : AsyncCommand<ServeCommand.Settings>
 
         var args = new List<string>
         {
-            "http",
             "serve",
             "--daemon-child",
             "--daemon-version",

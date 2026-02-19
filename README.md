@@ -32,7 +32,8 @@ dotnet tool install -g CodexD
 ### Start the server
 
 ```bash
-codex-d serve
+codex-d server start
+# or: codex-d serve
 ```
 
 Defaults:
@@ -51,7 +52,7 @@ Useful flags:
 ### Start the daemon server (Windows)
 
 ```bash
-codex-d serve -d
+codex-d daemon start
 ```
 
 Defaults:

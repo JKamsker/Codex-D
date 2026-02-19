@@ -250,12 +250,12 @@ public sealed class StatusCommand : AsyncCommand<StatusCommand.Settings>
         if (OperatingSystem.IsWindows())
         {
             AnsiConsole.MarkupLine("Start the daemon:");
-            AnsiConsole.MarkupLine("  [grey]codex-d serve -d[/]");
+            AnsiConsole.MarkupLine("  [grey]codex-d daemon start[/]");
             AnsiConsole.WriteLine();
         }
 
         AnsiConsole.MarkupLine("Or start a foreground server (project-local):");
-        AnsiConsole.MarkupLine("  [grey]codex-d serve[/]");
+        AnsiConsole.MarkupLine("  [grey]codex-d server start[/]");
         AnsiConsole.WriteLine();
     }
 

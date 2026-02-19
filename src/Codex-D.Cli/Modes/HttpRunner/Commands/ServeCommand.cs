@@ -611,9 +611,17 @@ public sealed class ServeCommand : AsyncCommand<ServeCommand.Settings>
             Version = StringHelpers.TrimOrNull(settings.DaemonVersion) ?? typeof(ServeCommand).Assembly.GetName().Version?.ToString() ?? "0.0.0"
         };
 
-        await DaemonRuntimeFile.WriteAtomicAsync(Path.Combine(stateDir, "daemon.runtime.json"), runtime, cancellationToken);
-        await app.WaitForShutdownAsync(cancellationToken);
-        return 0;
+        var runtimePath = Path.Combine(stateDir, "daemon.runtime.json");
+        await DaemonRuntimeFile.WriteAtomicAsync(runtimePath, runtime, cancellationToken);
+        try
+        {
+            await app.WaitForShutdownAsync(cancellationToken);
+            return 0;
+        }
+        finally
+        {
+            TryDeleteFile(runtimePath);
+        }
     }
 
     private static async Task<string> GetDesiredDaemonVersionAsync(bool isDev, CancellationToken ct)

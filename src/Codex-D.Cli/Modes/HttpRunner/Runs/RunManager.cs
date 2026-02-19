@@ -103,21 +103,22 @@ public sealed class RunManager
             return false;
         }
 
+        var interrupt = active.Interrupt;
+        if (interrupt is null)
+        {
+            return false;
+        }
+
+        Run? record;
         try
         {
-            var record = await _store.TryGetAsync(runId, ct);
-            if (record is null || !string.Equals(RunKinds.Normalize(record.Kind), RunKinds.Exec, StringComparison.Ordinal))
+            record = await _store.TryGetAsync(runId, ct);
+            if (record is null)
             {
                 return false;
             }
         }
         catch
-        {
-            return false;
-        }
-
-        var interrupt = active.Interrupt;
-        if (interrupt is null)
         {
             return false;
         }
@@ -362,7 +363,6 @@ public sealed class RunManager
             var result = await _executor.ExecuteAsync(ctx, runCts.Token);
 
             if (active.StopRequested &&
-                string.Equals(RunKinds.Normalize(record.Kind), RunKinds.Exec, StringComparison.Ordinal) &&
                 string.Equals(result.Status, RunStatuses.Interrupted, StringComparison.Ordinal))
             {
                 var paused = record with

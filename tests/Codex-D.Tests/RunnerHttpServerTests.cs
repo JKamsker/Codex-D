@@ -41,6 +41,26 @@ public sealed class RunnerHttpServerTests
     }
 
     [Fact]
+    public async Task Shutdown_ReturnsAccepted()
+    {
+        await using var host = await RunnerHttpTestHost.StartAsync(requireAuth: false, new ImmediateSuccessExecutor());
+        using var client = host.CreateHttpClient(includeToken: false);
+
+        var res = await client.PostAsync("/v1/shutdown", content: null);
+        Assert.Equal(HttpStatusCode.Accepted, res.StatusCode);
+    }
+
+    [Fact]
+    public async Task Shutdown_RejectsMissingToken_WhenAuthRequired()
+    {
+        await using var host = await RunnerHttpTestHost.StartAsync(requireAuth: true, new ImmediateSuccessExecutor());
+        using var client = host.CreateHttpClient(includeToken: false);
+
+        var res = await client.PostAsync("/v1/shutdown", content: null);
+        Assert.Equal(HttpStatusCode.Unauthorized, res.StatusCode);
+    }
+
+    [Fact]
     public async Task Auth_RejectsMissingToken_WhenRequired()
     {
         await using var host = await RunnerHttpTestHost.StartAsync(requireAuth: true, new ImmediateSuccessExecutor());

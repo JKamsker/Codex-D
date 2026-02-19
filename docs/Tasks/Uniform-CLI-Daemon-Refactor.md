@@ -17,6 +17,6 @@ Goal: make the `codex-d` CLI mostly uniform across run kinds (exec vs review/app
 
 - [ ] Add `codex-d daemon start|stop|status` and `codex-d server start|stop|status` command groups.
 - [ ] Make `codex-d serve` foreground-only; `codex-d serve -d/--daemon` becomes a hard error pointing to `codex-d daemon start`.
-- [ ] Add `POST /v1/shutdown` to the HTTP runner server (auth-protected) for graceful shutdown.
+- [x] Add `POST /v1/shutdown` to the HTTP runner server (auth-protected) for graceful shutdown.
 - [ ] Implement `codex-d daemon stop` via `/v1/shutdown` (with optional `--force` fallback kill).
 - [ ] Ensure daemon runtime file cleanup on shutdown and update docs/help hints (`codex-d status`, README).

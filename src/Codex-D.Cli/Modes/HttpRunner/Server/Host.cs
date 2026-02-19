@@ -14,6 +14,7 @@ using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Http.Json;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using System.Reflection;
 
@@ -150,6 +151,17 @@ public static class Host
                 await next();
             });
         }
+
+        app.MapPost("/v1/shutdown", (IHostApplicationLifetime lifetime) =>
+        {
+            _ = Task.Run(async () =>
+            {
+                await Task.Delay(50);
+                lifetime.StopApplication();
+            });
+
+            return Results.Accepted();
+        });
 
         app.MapGet("/v1/health", (RuntimeState state) =>
         {

@@ -78,15 +78,15 @@ public sealed class RunManager
             return false;
         }
 
-        var interrupt = active.Interrupt;
-        if (interrupt is null)
-        {
-            return false;
-        }
-
         try
         {
-            await interrupt(ct);
+            var inner = active.InterruptInner;
+            if (inner is not null)
+            {
+                await inner(ct);
+            }
+
+            try { active.InterruptCts.Cancel(); } catch { }
             return true;
         }
         catch (Exception ex)
@@ -99,12 +99,6 @@ public sealed class RunManager
     public async Task<bool> TryStopAsync(Guid runId, CancellationToken ct)
     {
         if (!_active.TryGetValue(runId, out var active))
-        {
-            return false;
-        }
-
-        var interrupt = active.Interrupt;
-        if (interrupt is null)
         {
             return false;
         }
@@ -127,8 +121,7 @@ public sealed class RunManager
 
         try
         {
-            await interrupt(ct);
-            return true;
+            return await TryInterruptAsync(runId, ct);
         }
         catch (Exception ex)
         {
@@ -281,7 +274,7 @@ public sealed class RunManager
             }
 
             active.RequestPause();
-            try { active.Cancellation?.Cancel(); } catch { }
+            try { active.InterruptCts.Cancel(); } catch { }
 
             try
             {
@@ -327,8 +320,7 @@ public sealed class RunManager
         RunReviewRequest? reviewOverride,
         CancellationToken outerCt)
     {
-        using var runCts = CancellationTokenSource.CreateLinkedTokenSource(outerCt);
-        active.Cancellation = runCts;
+        using var runCts = CancellationTokenSource.CreateLinkedTokenSource(outerCt, active.InterruptCts.Token);
 
         var runId = record.RunId;
         DateTimeOffset? lastNotificationAt = record.CodexLastNotificationAt;
@@ -362,7 +354,7 @@ public sealed class RunManager
                 _backlog.SetRolloutPath(runId, record.CodexRolloutPath);
             }
 
-            void SetInterrupt(Func<CancellationToken, Task> interrupt) => active.Interrupt = interrupt;
+            void SetInterrupt(Func<CancellationToken, Task> interrupt) => active.InterruptInner = interrupt;
 
             var ctx = new RunExecutionContext
             {
@@ -381,7 +373,23 @@ public sealed class RunManager
                 SetInterrupt = SetInterrupt
             };
 
-            var result = await _executor.ExecuteAsync(ctx, runCts.Token);
+            RunExecutionResult result;
+            try
+            {
+                result = await _executor.ExecuteAsync(ctx, runCts.Token);
+            }
+            catch (OperationCanceledException) when (outerCt.IsCancellationRequested)
+            {
+                return;
+            }
+            catch (OperationCanceledException) when (active.PauseRequested)
+            {
+                return;
+            }
+            catch (OperationCanceledException)
+            {
+                result = new RunExecutionResult { Status = RunStatuses.Interrupted, Error = null };
+            }
 
             if (active.StopRequested &&
                 string.Equals(result.Status, RunStatuses.Interrupted, StringComparison.Ordinal))
@@ -409,14 +417,6 @@ public sealed class RunManager
 
             await _store.UpdateAsync(runId, completed, runCts.Token);
             await AppendAndPublishAsync(runId, "run.completed", completed, runCts.Token);
-        }
-        catch (OperationCanceledException) when (outerCt.IsCancellationRequested)
-        {
-            // ignore outer cancellation
-        }
-        catch (OperationCanceledException)
-        {
-            // run cancelled (PauseAllInProgressAsync may have already finalized state)
         }
         catch (CodexAppServerDisconnectedException ex) when (!string.IsNullOrWhiteSpace(record.CodexThreadId))
         {
@@ -533,8 +533,8 @@ public sealed class RunManager
         }
 
         public Guid RunId { get; }
-        public CancellationTokenSource? Cancellation { get; set; }
-        public Func<CancellationToken, Task>? Interrupt { get; set; }
+        public CancellationTokenSource InterruptCts { get; } = new();
+        public Func<CancellationToken, Task>? InterruptInner { get; set; }
 
         private int _stopRequested;
         private int _pauseRequested;

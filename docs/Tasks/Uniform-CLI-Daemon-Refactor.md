@@ -12,6 +12,7 @@ Goal: make the `codex-d` CLI mostly uniform across run kinds (exec vs review/app
 - [x] Make `run resume` work for `kind=review` by continuing as an exec/appserver turn with a continuation prefix.
 - [x] Update CLI help + README text for the new uniform semantics.
 - [x] Add/adjust tests for stop/resume on `kind=review`.
+- [x] Fix `run stop`/`run interrupt` to work even before the executor registers an interrupt handler.
 
 ### Daemon/Server command groups
 

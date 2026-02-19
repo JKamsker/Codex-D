@@ -4,19 +4,19 @@
 
 ## Goals
 
-* **Daemon server (`http serve -d`)**
+* **Daemon server (`serve -d`)**
 
   * Runs **detached** (background) on **Windows**.
   * Uses a **state dir in `%LOCALAPPDATA%`** (global per-user).
   * Uses a **dynamic port by default** (avoid conflicts with the foreground port).
   * Writes a **runtime file** (port/baseUrl/etc.) so clients can discover it.
 
-* **Foreground server (`http serve`)**
+* **Foreground server (`serve`)**
 
   * Runs in the **foreground** (current behavior).
   * Uses a **state dir relative to the current working directory** by default (project-local).
 
-* **HTTP client operations (`http exec/review/attach/ls`)**
+* **Client operations (`exec/review/attach/ls`)**
 
   * **Prefer the daemon by default.**
   * If daemon not available, **try the foreground static port**.
@@ -34,8 +34,8 @@
 
 ## Terminology
 
-* **Daemon**: detached/background server started via `codex-d http serve -d`.
-* **Foreground**: normal server started via `codex-d http serve`.
+* **Daemon**: detached/background server started via `codex-d serve -d`.
+* **Foreground**: normal server started via `codex-d serve`.
 
 ---
 
@@ -106,7 +106,7 @@ Contains:
 
 Command:
 
-* `codex-d http serve`
+* `codex-d serve`
 
 Defaults:
 
@@ -135,7 +135,7 @@ Behavior:
 
 Command:
 
-* `codex-d http serve -d` (detached / daemon)
+* `codex-d serve -d` (detached / daemon)
 
 Defaults:
 
@@ -158,9 +158,9 @@ Behavior (high level):
 
 **Non-Windows behavior:**
 
-* `http serve -d` should fail fast with a clear message:
+* `serve -d` should fail fast with a clear message:
 
-  * “Daemon mode is currently supported only on Windows. Use `codex-d http serve` (foreground) instead.”
+  * “Daemon mode is currently supported only on Windows. Use `codex-d serve` (foreground) instead.”
 
 ---
 
@@ -251,10 +251,10 @@ Tried:
   - Foreground: http://127.0.0.1:8787 (unreachable)
 
 Start the daemon:
-  codex-d http serve -d
+  codex-d serve -d
 
 Or start a foreground server (project-local):
-  codex-d http serve
+  codex-d serve
 ```
 
 Important: **Do not** start anything automatically in response to this failure in v1.
@@ -274,10 +274,10 @@ Keep existing env vars if already present, but add daemon/foreground controls.
 
 ### Serve
 
-* `CODEX_D_FOREGROUND_STATE_DIR` (optional): default state dir for `http serve`
-* `CODEX_D_DAEMON_STATE_DIR` (optional): default state dir for `http serve -d`
-* `CODEX_D_FOREGROUND_PORT` (optional): default port for `http serve`
-* `CODEX_D_DAEMON_PORT` (optional): default port for `http serve -d`
+* `CODEX_D_FOREGROUND_STATE_DIR` (optional): default state dir for `serve`
+* `CODEX_D_DAEMON_STATE_DIR` (optional): default state dir for `serve -d`
+* `CODEX_D_FOREGROUND_PORT` (optional): default port for `serve`
+* `CODEX_D_DAEMON_PORT` (optional): default port for `serve -d`
 
 Command-line flags always win over env vars.
 
@@ -302,7 +302,7 @@ Command-line flags always win over env vars.
 
 ### B) Foreground server default state dir change
 
-* [x] Update `http serve` default state dir to `<cwd>\.codex-d` (unless `--state-dir` / env override).
+* [x] Update `serve` default state dir to `<cwd>\.codex-d` (unless `--state-dir` / env override).
 * [x] Ensure printed banner shows the new StateDir.
 * [x] Ensure this change doesn’t affect daemon defaults.
 
@@ -310,7 +310,7 @@ Command-line flags always win over env vars.
 
 * [x] Add flag to server command:
 
-  * [x] `http serve -d|--daemon` (Windows-only)
+  * [x] `serve -d|--daemon` (Windows-only)
 * [x] Implement “parent/child” strategy:
 
   * [x] Parent spawns child process with hidden/internal `--daemon-child` flag.
@@ -324,7 +324,7 @@ Command-line flags always win over env vars.
   * [x] auth required
 * [x] On non-Windows:
 
-  * [x] `http serve -d` prints “Windows-only” error and exits non-zero.
+  * [x] `serve -d` prints “Windows-only” error and exits non-zero.
 
 ### D) Copy/install-self to daemon bin dir (Windows)
 
@@ -394,8 +394,8 @@ Command-line flags always win over env vars.
 
 ## Acceptance Criteria (Iteration 1)
 
-* [x] `codex-d http serve` starts a foreground server using `<cwd>\.codex-d` by default.
-* [x] `codex-d http serve -d` on Windows starts a detached daemon server, writes runtime file, and returns control to the terminal.
+* [x] `codex-d serve` starts a foreground server using `<cwd>\.codex-d` by default.
+* [x] `codex-d serve -d` on Windows starts a detached daemon server, writes runtime file, and returns control to the terminal.
 * [x] Any client command without `--url`:
 
   * [x] prefers daemon if available,

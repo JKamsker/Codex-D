@@ -27,12 +27,12 @@ Open a new terminal and run `codex-d --help`.
 dotnet tool install -g CodexD
 ```
 
-## HTTP mode
+## Runner (HTTP/SSE)
 
 ### Start the server
 
 ```bash
-codex-d http serve
+codex-d serve
 ```
 
 Defaults:
@@ -51,7 +51,7 @@ Useful flags:
 ### Start the daemon server (Windows)
 
 ```bash
-codex-d http serve -d
+codex-d serve -d
 ```
 
 Defaults:
@@ -63,7 +63,7 @@ Defaults:
 Useful flags:
 - `--force` (stop/replace any running daemon and reinstall binaries before starting)
 
-Clients (`http exec/review/attach/ls`) prefer the daemon by default. If the daemon isn’t available, they fall back to the foreground server at the configured foreground port (default `8787`). No client command will auto-start the daemon in v1.
+Clients (`exec/review/attach/ls`) prefer the daemon by default. If the daemon isn’t available, they fall back to the foreground server at the configured foreground port (default `8787`). No client command will auto-start the daemon in v1.
 
 #### Dev/debug defaults (dotnet run)
 
@@ -77,13 +77,13 @@ To force dev-mode defaults in a Release build, set `CODEX_D_DEV_MODE=1`.
 ### Run a prompt (attached)
 
 ```bash
-codex-d http exec "Hello"
+codex-d exec "Hello"
 ```
 
 Set reasoning effort (applies to this turn and subsequent turns in the run):
 
 ```bash
-codex-d http exec --reasoning high "Be thorough"
+codex-d exec --reasoning high "Be thorough"
 ```
 
 ### Run a code review (non-interactive)
@@ -91,25 +91,25 @@ codex-d http exec --reasoning high "Be thorough"
 Review uncommitted changes in the current repo:
 
 ```bash
-codex-d http review --uncommitted
+codex-d review --uncommitted
 ```
 
 Set reasoning effort for the review (exec mode):
 
 ```bash
-codex-d http review --reasoning high --uncommitted
+codex-d review --reasoning high --uncommitted
 ```
 
 Review a specific commit:
 
 ```bash
-codex-d http review --commit <SHA>
+codex-d review --commit <SHA>
 ```
 
 Targeted review (scope + custom instructions):
 
 ```bash
-codex-d http review --base <REF> --prompt "Review for parity vs 4Story…"
+codex-d review --base <REF> --prompt "Review for parity vs 4Story…"
 ```
 
 Note: upstream `codex review` (exec-mode) treats `PROMPT` as a mutually-exclusive target selector, so `codex-d` will run prompt+scope reviews via app-server mode to preserve both.
@@ -117,58 +117,58 @@ Note: upstream `codex review` (exec-mode) treats `PROMPT` as a mutually-exclusiv
 Detach (run continues on server after your terminal exits):
 
 ```bash
-codex-d http exec -d "Long task"
+codex-d exec -d "Long task"
 ```
 
 Attach to a run:
 
 ```bash
-codex-d http run attach <RUN_ID>
+codex-d run attach <RUN_ID>
 ```
 
 List runs (defaults to current directory; use `--all` for everything):
 
 ```bash
-codex-d http runs ls
-codex-d http runs ls --all
+codex-d runs ls
+codex-d runs ls --all
 ```
 
 Interrupt a run:
 
 ```bash
-codex-d http run interrupt <RUN_ID>
-codex-d http run interrupt --last
+codex-d run interrupt <RUN_ID>
+codex-d run interrupt --last
 ```
 
 Pause (stop) a running exec run so it can be resumed:
 
 ```bash
-codex-d http run stop <RUN_ID>
+codex-d run stop <RUN_ID>
 ```
 
 Resume a paused exec run (default prompt: "continue"):
 
 ```bash
-codex-d http run resume <RUN_ID>
+codex-d run resume <RUN_ID>
 ```
 
 Override reasoning effort on resume:
 
 ```bash
-codex-d http run resume --reasoning low <RUN_ID>
+codex-d run resume --reasoning low <RUN_ID>
 ```
 
 Inspect a run’s output artifacts:
 
 ```bash
-codex-d http run messages <RUN_ID>
-codex-d http run thinking <RUN_ID>
+codex-d run messages <RUN_ID>
+codex-d run thinking <RUN_ID>
 ```
 
 Show CLI + server versions (daemon/foreground):
 
 ```bash
-codex-d http version
+codex-d version
 ```
 
 Client env vars:
@@ -189,5 +189,5 @@ Serve env vars:
 
 ```bash
 codex-d --help
-codex-d http --help
+codex-d cloud --help
 ```

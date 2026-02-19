@@ -176,7 +176,7 @@ public sealed class ClientSettingsBaseTests
             if (OperatingSystem.IsWindows())
             {
                 Assert.Contains("Start the daemon:", ex.UserMessage, StringComparison.Ordinal);
-                Assert.Contains("codex-d http serve -d", ex.UserMessage, StringComparison.Ordinal);
+                Assert.Contains("codex-d serve -d", ex.UserMessage, StringComparison.Ordinal);
             }
             Assert.Contains($"http://127.0.0.1:{unusedPort}", ex.UserMessage, StringComparison.Ordinal);
         }

@@ -59,7 +59,7 @@ public sealed class LsCommand : AsyncCommand<LsCommand.Settings>
             return 0;
         }
 
-        AnsiConsole.Write(new Rule("[bold]codex-d http runs ls[/]").LeftJustified());
+        AnsiConsole.Write(new Rule("[bold]codex-d runs ls[/]").LeftJustified());
         var nowLocal = DateTimeOffset.Now;
         AnsiConsole.MarkupLine($"Now: [grey]{nowLocal:yyyy-MM-dd HH:mm:ss}[/]");
         AnsiConsole.WriteLine();

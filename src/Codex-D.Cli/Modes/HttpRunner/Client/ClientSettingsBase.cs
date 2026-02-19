@@ -109,7 +109,7 @@ public abstract class ClientSettingsBase : CommandSettings
             ?
 $@"
 Start the daemon:
-  codex-d http serve -d
+  codex-d serve -d
 "
             : string.Empty;
 
@@ -121,7 +121,7 @@ Tried:
   - Foreground: {foregroundBaseUrl} ({fgAttempt})
 {startHint}
 Or start a foreground server (project-local):
-  codex-d http serve");
+  codex-d serve");
     }
 
     private static int? TryGetEnvInt(string name)

@@ -187,7 +187,7 @@ public sealed class StatusCommand : AsyncCommand<StatusCommand.Settings>
             return;
         }
 
-        AnsiConsole.Write(new Rule("[bold]codex-d http status[/]").LeftJustified());
+        AnsiConsole.Write(new Rule("[bold]codex-d status[/]").LeftJustified());
         foreach (var p in probes)
         {
             AnsiConsole.MarkupLine($"[grey]{JsonSerializer.Serialize(p, new JsonSerializerOptions(JsonSerializerDefaults.Web))}[/]");
@@ -250,12 +250,12 @@ public sealed class StatusCommand : AsyncCommand<StatusCommand.Settings>
         if (OperatingSystem.IsWindows())
         {
             AnsiConsole.MarkupLine("Start the daemon:");
-            AnsiConsole.MarkupLine("  [grey]codex-d http serve -d[/]");
+            AnsiConsole.MarkupLine("  [grey]codex-d serve -d[/]");
             AnsiConsole.WriteLine();
         }
 
         AnsiConsole.MarkupLine("Or start a foreground server (project-local):");
-        AnsiConsole.MarkupLine("  [grey]codex-d http serve[/]");
+        AnsiConsole.MarkupLine("  [grey]codex-d serve[/]");
         AnsiConsole.WriteLine();
     }
 

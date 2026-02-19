@@ -115,7 +115,7 @@ public sealed class VersionCommand : AsyncCommand<VersionCommand.Settings>
             return;
         }
 
-        AnsiConsole.Write(new Rule("[bold]codex-d http version[/]").LeftJustified());
+        AnsiConsole.Write(new Rule("[bold]codex-d version[/]").LeftJustified());
         AnsiConsole.MarkupLine($"CLI: [grey]{Markup.Escape(cliVersion)}[/]");
 
         if (resolved is not null)

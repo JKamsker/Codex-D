@@ -30,10 +30,10 @@ public static class HttpCli
                 .WithDescription("Send additional text to an active turn (turn/steer).");
 
             run.AddCommand<StopCommand>("stop")
-                .WithDescription("Pause (stop) a running exec run so it can be resumed.");
+                .WithDescription("Stop (pause) a running run so it can be resumed (exec + review).");
 
             run.AddCommand<ResumeCommand>("resume")
-                .WithDescription("Resume a paused (or orphaned) exec run by starting a new turn (default prompt: \"continue\").");
+                .WithDescription("Resume a paused run (exec + review) by starting a new turn (default prompt: \"continue\").");
 
             run.AddCommand<RunMessagesCommand>("messages")
                 .WithDescription("Print the last completed agent message(s) for a run.");

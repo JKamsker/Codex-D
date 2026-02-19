@@ -140,13 +140,13 @@ codex-d run interrupt <RUN_ID>
 codex-d run interrupt --last
 ```
 
-Pause (stop) a running exec run so it can be resumed:
+Stop (pause) a run so it can be resumed:
 
 ```bash
 codex-d run stop <RUN_ID>
 ```
 
-Resume a paused exec run (default prompt: "continue"):
+Resume a paused run (exec + review) (default prompt: "continue"):
 
 ```bash
 codex-d run resume <RUN_ID>

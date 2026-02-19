@@ -10,7 +10,7 @@ Goal: make the `codex-d` CLI mostly uniform across run kinds (exec vs review/app
 
 - [x] Make `run stop` pause *any* run kind (review/appserver included) and emit `run.paused`.
 - [x] Make `run resume` work for `kind=review` by continuing as an exec/appserver turn with a continuation prefix.
-- [ ] Update CLI help + README text for the new uniform semantics.
+- [x] Update CLI help + README text for the new uniform semantics.
 - [x] Add/adjust tests for stop/resume on `kind=review`.
 
 ### Daemon/Server command groups

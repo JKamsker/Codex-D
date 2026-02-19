@@ -42,6 +42,34 @@ public static class HttpCli
                 .WithDescription("Print one-line summaries from thinking blocks (bold **...** headings).");
         });
 
+        config.AddBranch("daemon", daemon =>
+        {
+            daemon.SetDescription("Manage the detached daemon HTTP runner (Windows).");
+
+            daemon.AddCommand<CodexD.HttpRunner.Commands.Daemon.StartCommand>("start")
+                .WithDescription("Start the daemon HTTP runner.");
+
+            daemon.AddCommand<CodexD.HttpRunner.Commands.Daemon.StopCommand>("stop")
+                .WithDescription("Stop the daemon HTTP runner.");
+
+            daemon.AddCommand<CodexD.HttpRunner.Commands.Daemon.StatusCommand>("status")
+                .WithDescription("Show daemon health/info.");
+        });
+
+        config.AddBranch("server", server =>
+        {
+            server.SetDescription("Manage the foreground HTTP runner.");
+
+            server.AddCommand<CodexD.HttpRunner.Commands.Server.StartCommand>("start")
+                .WithDescription("Start the foreground HTTP runner.");
+
+            server.AddCommand<CodexD.HttpRunner.Commands.Server.StopCommand>("stop")
+                .WithDescription("Stop the foreground HTTP runner (via /v1/shutdown).");
+
+            server.AddCommand<CodexD.HttpRunner.Commands.Server.StatusCommand>("status")
+                .WithDescription("Show foreground server health.");
+        });
+
         config.AddCommand<ServeCommand>("serve")
             .WithDescription("Start the HTTP/SSE runner.");
 

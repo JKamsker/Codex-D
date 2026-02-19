@@ -116,7 +116,7 @@ public sealed class ServeCommand : AsyncCommand<ServeCommand.Settings>
         return await RunForegroundAsync(settings, format, cancellationToken);
     }
 
-    private static async Task<int> RunForegroundAsync(Settings settings, OutputFormat format, CancellationToken cancellationToken)
+    internal static async Task<int> RunForegroundAsync(Settings settings, OutputFormat format, CancellationToken cancellationToken)
     {
         var json = format != OutputFormat.Human;
 
@@ -203,7 +203,7 @@ public sealed class ServeCommand : AsyncCommand<ServeCommand.Settings>
         return 0;
     }
 
-    private static async Task<int> RunDaemonParentAsync(Settings settings, OutputFormat format, CancellationToken cancellationToken)
+    internal static async Task<int> RunDaemonParentAsync(Settings settings, OutputFormat format, CancellationToken cancellationToken)
     {
         var json = format != OutputFormat.Human;
         var isDev = BuildMode.IsDev();
@@ -533,7 +533,7 @@ public sealed class ServeCommand : AsyncCommand<ServeCommand.Settings>
         return 1;
     }
 
-    private static async Task<int> RunDaemonChildAsync(Settings settings, OutputFormat format, CancellationToken cancellationToken)
+    internal static async Task<int> RunDaemonChildAsync(Settings settings, OutputFormat format, CancellationToken cancellationToken)
     {
         var json = format != OutputFormat.Human;
         var isDev = BuildMode.IsDev();

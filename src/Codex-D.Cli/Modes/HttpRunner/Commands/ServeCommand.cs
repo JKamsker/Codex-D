@@ -90,27 +90,18 @@ public sealed class ServeCommand : AsyncCommand<ServeCommand.Settings>
 
         var json = format != OutputFormat.Human;
 
-        if (settings.Daemon || settings.DaemonChild)
+        if (settings.Daemon || settings.DaemonChild || settings.Force || !string.IsNullOrWhiteSpace(settings.DaemonVersion))
         {
-            if (!OperatingSystem.IsWindows())
+            var msg = "Use `codex-d daemon start` for daemon mode (serve is foreground-only).";
+            if (json)
             {
-                if (json)
-                {
-                    CliOutput.WriteJsonError("unsupported", "Daemon mode is currently supported only on Windows. Use `codex-d serve` (foreground) instead.");
-                }
-                else
-                {
-                    AnsiConsole.MarkupLine("[red]Daemon mode is currently supported only on Windows.[/] Use [grey]codex-d serve[/] (foreground) instead.");
-                }
-                return 2;
+                CliOutput.WriteJsonError("invalid_args", msg);
             }
-
-            if (settings.DaemonChild)
+            else
             {
-                return await RunDaemonChildAsync(settings, format, cancellationToken);
+                AnsiConsole.MarkupLine($"[red]{Markup.Escape(msg)}[/]");
             }
-
-            return await RunDaemonParentAsync(settings, format, cancellationToken);
+            return 2;
         }
 
         return await RunForegroundAsync(settings, format, cancellationToken);
@@ -365,7 +356,8 @@ public sealed class ServeCommand : AsyncCommand<ServeCommand.Settings>
 
         var args = new List<string>
         {
-            "serve",
+            "daemon",
+            "start",
             "--daemon-child",
             "--daemon-version",
             desiredVersion,

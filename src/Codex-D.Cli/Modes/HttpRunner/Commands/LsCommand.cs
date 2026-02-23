@@ -67,8 +67,9 @@ public sealed class LsCommand : AsyncCommand<LsCommand.Settings>
         var table = new Table().Border(TableBorder.Rounded);
         table.AddColumn("RunId");
         table.AddColumn("Created");
-        table.AddColumn("LastRecv");
+        table.AddColumn("LastNote");
         table.AddColumn("Status");
+        table.AddColumn("Active");
         if (settings.All)
         {
             table.AddColumn("Cwd");
@@ -77,14 +78,15 @@ public sealed class LsCommand : AsyncCommand<LsCommand.Settings>
         foreach (var r in runs.OrderByDescending(x => x.CreatedAt))
         {
             var created = r.CreatedAt.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss");
-            var lastRecv = r.CodexLastNotificationAt?.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss") ?? "-";
+            var lastNote = r.CodexLastNotificationAt?.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss") ?? "-";
+            var active = r.IsActive is true ? "yes" : r.IsActive is false ? "no" : "-";
             if (settings.All)
             {
-                table.AddRow(r.RunId.ToString("D"), created, lastRecv, r.Status, r.Cwd);
+                table.AddRow(r.RunId.ToString("D"), created, lastNote, r.Status, active, r.Cwd);
             }
             else
             {
-                table.AddRow(r.RunId.ToString("D"), created, lastRecv, r.Status);
+                table.AddRow(r.RunId.ToString("D"), created, lastNote, r.Status, active);
             }
         }
 

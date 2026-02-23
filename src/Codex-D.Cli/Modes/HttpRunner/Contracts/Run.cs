@@ -12,6 +12,7 @@ public sealed record class Run
     public string? CodexTurnId { get; init; }
     public DateTimeOffset? CodexLastNotificationAt { get; init; }
     public string? CodexRolloutPath { get; init; }
+    public bool? IsActive { get; init; }
     public string? Kind { get; init; }
     public RunReviewRequest? Review { get; init; }
     public string? Model { get; init; }

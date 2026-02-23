@@ -72,6 +72,7 @@ public static class Host
             builder.Services.AddSingleton<IRunExecutor, DispatchingRunExecutor>();
         }
         builder.Services.AddSingleton<RunManager>();
+        builder.Services.AddHostedService<OrphanedRunReconciler>();
 
         builder.Services.AddOptions<ProcessHostOptions>();
 
@@ -318,7 +319,7 @@ public static class Host
             }
         });
 
-        app.MapGet("/v1/runs", async (HttpRequest req, RunStore store, RunNotificationBacklog backlog, CancellationToken ct) =>
+        app.MapGet("/v1/runs", async (HttpRequest req, RunStore store, RunNotificationBacklog backlog, RunManager runs, CancellationToken ct) =>
         {
             var all = ParseBool(req.Query["all"]) ?? false;
             var cwd = req.Query["cwd"].ToString();
@@ -344,15 +345,17 @@ public static class Host
             var merged = new List<Run>(items.Count);
             foreach (var item in items)
             {
-                merged.Add(WithCodexLastNotificationAt(item, backlog));
+                merged.Add(WithIsActive(WithCodexLastNotificationAt(item, backlog), runs));
             }
             return Results.Ok(new { items = merged });
         });
 
-        app.MapGet("/v1/runs/{runId:guid}", async (Guid runId, RunStore store, RunNotificationBacklog backlog, CancellationToken ct) =>
+        app.MapGet("/v1/runs/{runId:guid}", async (Guid runId, RunStore store, RunNotificationBacklog backlog, RunManager runs, CancellationToken ct) =>
         {
             var record = await store.TryGetAsync(runId, ct);
-            return record is null ? Results.NotFound(new { error = "not_found" }) : Results.Ok(WithCodexLastNotificationAt(record, backlog));
+            return record is null
+                ? Results.NotFound(new { error = "not_found" })
+                : Results.Ok(WithIsActive(WithCodexLastNotificationAt(record, backlog), runs));
         });
 
         app.MapPost("/v1/runs/{runId:guid}/interrupt", async (Guid runId, RunManager runs, CancellationToken ct) =>
@@ -971,6 +974,9 @@ public static class Host
 
         return run;
     }
+
+    private static Run WithIsActive(Run run, RunManager runs) =>
+        run with { IsActive = runs.IsActive(run.RunId) };
 
     private static bool HasRawEventsFile(string runDirectory) =>
         File.Exists(Path.Combine(runDirectory, "events.jsonl"));

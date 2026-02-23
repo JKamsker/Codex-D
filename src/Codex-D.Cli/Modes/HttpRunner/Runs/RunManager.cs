@@ -11,6 +11,7 @@ namespace CodexD.HttpRunner.Runs;
 public sealed class RunManager
 {
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
+    private static readonly TimeSpan NotificationCheckpointInterval = TimeSpan.FromSeconds(2);
 
     private readonly RunStore _store;
     private readonly RunEventBroadcaster _broadcaster;
@@ -70,6 +71,8 @@ public sealed class RunManager
 
         return record;
     }
+
+    public bool IsActive(Guid runId) => _active.ContainsKey(runId);
 
     public async Task<bool> TryInterruptAsync(Guid runId, CancellationToken ct)
     {
@@ -325,12 +328,44 @@ public sealed class RunManager
         var runId = record.RunId;
         DateTimeOffset? lastNotificationAt = record.CodexLastNotificationAt;
         var lastRolloutResolveAt = DateTimeOffset.MinValue;
+        var lastNotificationCheckpointAt = DateTimeOffset.MinValue;
         try
         {
             var now = DateTimeOffset.UtcNow;
             record = record with { Status = RunStatuses.Running, StartedAt = now };
             await _store.UpdateAsync(runId, record, runCts.Token);
             await AppendAndPublishAsync(runId, "run.meta", record, runCts.Token);
+
+            async Task MaybeCheckpointLastNotificationAtAsync(CancellationToken ct)
+            {
+                if (lastNotificationAt is null)
+                {
+                    return;
+                }
+
+                var now = DateTimeOffset.UtcNow;
+                if (lastNotificationCheckpointAt != DateTimeOffset.MinValue &&
+                    now - lastNotificationCheckpointAt < NotificationCheckpointInterval)
+                {
+                    return;
+                }
+
+                lastNotificationCheckpointAt = now;
+
+                try
+                {
+                    record = record with { CodexLastNotificationAt = lastNotificationAt };
+                    await _store.UpdateAsync(runId, record, ct);
+                }
+                catch (OperationCanceledException) when (ct.IsCancellationRequested)
+                {
+                    // ignore
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogDebug(ex, "Failed to checkpoint CodexLastNotificationAt. runId={RunId}", runId);
+                }
+            }
 
             async Task MaybeResolveRolloutPathAsync(CancellationToken ct)
             {
@@ -369,6 +404,7 @@ public sealed class RunManager
                 async Task PublishAndMaybeResolveAsync(string method, JsonElement @params, CancellationToken ct)
                 {
                     await AppendAndPublishAsync(runId, "codex.notification", new { method, @params }, ct);
+                    await MaybeCheckpointLastNotificationAtAsync(ct);
                     try
                     {
                         await MaybeResolveRolloutPathAsync(ct);

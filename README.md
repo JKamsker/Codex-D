@@ -81,6 +81,12 @@ To force dev-mode defaults in a Release build, set `CODEX_D_DEV_MODE=1`.
 codex-d exec "Hello"
 ```
 
+Constrain the final assistant message to a JSON Schema (structured output):
+
+```bash
+codex-d exec --schema schema.json "Return JSON only"
+```
+
 Set reasoning effort (applies to this turn and subsequent turns in the run):
 
 ```bash

@@ -70,7 +70,8 @@ public sealed class CodexAppServerRunExecutor : IRunExecutor
                 Model = model,
                 Effort = effort,
                 ApprovalPolicy = approvalPolicy,
-                SandboxPolicy = null
+                SandboxPolicy = null,
+                OutputSchema = context.OutputSchema
             },
             ct);
 

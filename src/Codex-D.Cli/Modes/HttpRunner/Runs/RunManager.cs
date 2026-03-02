@@ -45,6 +45,18 @@ public sealed class RunManager
         var cwd = NormalizeAndValidateCwd(request.Cwd);
         var kind = RunKinds.Normalize(request.Kind);
 
+        JsonElement? outputSchema = null;
+        if (request.OutputSchema is { } schema &&
+            schema.ValueKind is not (JsonValueKind.Undefined or JsonValueKind.Null))
+        {
+            outputSchema = schema.Clone();
+        }
+
+        if (kind == RunKinds.Review && outputSchema is not null)
+        {
+            throw new ArgumentException("OutputSchema is not supported for review runs.");
+        }
+
         var created = await _store.CreateAsync(
             new RunCreateOptions
             {
@@ -54,7 +66,8 @@ public sealed class RunManager
                 Model = string.IsNullOrWhiteSpace(request.Model) ? null : request.Model.Trim(),
                 Effort = string.IsNullOrWhiteSpace(request.Effort) ? null : request.Effort.Trim(),
                 Sandbox = string.IsNullOrWhiteSpace(request.Sandbox) ? null : request.Sandbox.Trim(),
-                ApprovalPolicy = string.IsNullOrWhiteSpace(request.ApprovalPolicy) ? null : request.ApprovalPolicy.Trim()
+                ApprovalPolicy = string.IsNullOrWhiteSpace(request.ApprovalPolicy) ? null : request.ApprovalPolicy.Trim(),
+                OutputSchema = outputSchema
             },
             ct);
 
@@ -464,6 +477,7 @@ public sealed class RunManager
                 Effort = record.Effort,
                 Sandbox = record.Sandbox,
                 ApprovalPolicy = record.ApprovalPolicy,
+                OutputSchema = record.OutputSchema,
                 PublishNotificationAsync = PublishNotificationAsync,
                 SetCodexIdsAsync = SetCodexIdsAsync,
                 SetInterrupt = SetInterrupt

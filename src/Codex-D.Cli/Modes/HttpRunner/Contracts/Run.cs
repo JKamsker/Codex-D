@@ -1,3 +1,5 @@
+using System.Text.Json;
+
 namespace CodexD.HttpRunner.Contracts;
 
 public sealed record class Run
@@ -19,6 +21,7 @@ public sealed record class Run
     public string? Effort { get; init; }
     public string? Sandbox { get; init; }
     public string? ApprovalPolicy { get; init; }
+    public JsonElement? OutputSchema { get; init; }
     public string? Error { get; init; }
 }
 

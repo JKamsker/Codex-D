@@ -13,6 +13,7 @@ public sealed class RunCreateOptions
     public string? Effort { get; init; }
     public string? Sandbox { get; init; }
     public string? ApprovalPolicy { get; init; }
+    public JsonElement? OutputSchema { get; init; }
 }
 
 public sealed class RunStore
@@ -93,6 +94,7 @@ public sealed class RunStore
             Effort = options.Effort,
             Sandbox = options.Sandbox,
             ApprovalPolicy = options.ApprovalPolicy,
+            OutputSchema = options.OutputSchema,
             Error = null
         };
 

@@ -36,6 +36,10 @@ public sealed class ExecCommand : AsyncCommand<ExecCommand.Settings>
         [CommandOption("--approval-policy <POLICY>")]
         [DefaultValue("never")]
         public string ApprovalPolicy { get; init; } = "never";
+
+        [CommandOption("--schema|--output-schema <PATH>")]
+        [Description("Optional JSON Schema file path used to constrain the final assistant message (app-server outputSchema).")]
+        public string? OutputSchemaPath { get; init; }
     }
 
     public override async Task<int> ExecuteAsync(CommandContext context, Settings settings, CancellationToken cancellationToken)
@@ -78,10 +82,11 @@ public sealed class ExecCommand : AsyncCommand<ExecCommand.Settings>
         try
         {
             var prompt = ResolvePrompt(settings);
+            var outputSchema = ResolveOutputSchema(settings.OutputSchemaPath);
 
             using var client = new RunnerClient(resolved.BaseUrl, resolved.Token);
 
-            var request = CreateExecRequest(settings, resolved.Cwd, prompt);
+            var request = CreateExecRequest(settings, resolved.Cwd, prompt, outputSchema);
 
             var created = await client.CreateRunAsync(request, cancellationToken);
             var runId = created.RunId;
@@ -116,7 +121,7 @@ public sealed class ExecCommand : AsyncCommand<ExecCommand.Settings>
         }
     }
 
-    private static CreateRunRequest CreateExecRequest(Settings settings, string cwd, string prompt) =>
+    private static CreateRunRequest CreateExecRequest(Settings settings, string cwd, string prompt, JsonElement? outputSchema) =>
         new()
         {
             Cwd = cwd,
@@ -124,8 +129,33 @@ public sealed class ExecCommand : AsyncCommand<ExecCommand.Settings>
             Model = string.IsNullOrWhiteSpace(settings.Model) ? null : settings.Model.Trim(),
             Effort = string.IsNullOrWhiteSpace(settings.Effort) ? null : settings.Effort.Trim(),
             Sandbox = string.IsNullOrWhiteSpace(settings.Sandbox) ? null : settings.Sandbox.Trim(),
-            ApprovalPolicy = string.IsNullOrWhiteSpace(settings.ApprovalPolicy) ? "never" : settings.ApprovalPolicy.Trim()
+            ApprovalPolicy = string.IsNullOrWhiteSpace(settings.ApprovalPolicy) ? "never" : settings.ApprovalPolicy.Trim(),
+            OutputSchema = outputSchema
         };
+
+    private static JsonElement? ResolveOutputSchema(string? outputSchemaPath)
+    {
+        if (string.IsNullOrWhiteSpace(outputSchemaPath))
+        {
+            return null;
+        }
+
+        var path = Path.GetFullPath(outputSchemaPath.Trim());
+        if (!File.Exists(path))
+        {
+            throw new ArgumentException($"Schema file not found: {path}");
+        }
+
+        try
+        {
+            using var doc = JsonDocument.Parse(File.ReadAllText(path));
+            return doc.RootElement.Clone();
+        }
+        catch (JsonException ex)
+        {
+            throw new ArgumentException($"Invalid JSON schema file: {path}: {ex.Message}");
+        }
+    }
 
     private static string ResolvePrompt(Settings settings)
     {

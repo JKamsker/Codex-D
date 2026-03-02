@@ -20,6 +20,7 @@ public sealed record class RunExecutionContext
     public string? Effort { get; init; }
     public string? Sandbox { get; init; }
     public string? ApprovalPolicy { get; init; }
+    public JsonElement? OutputSchema { get; init; }
     public required Func<string, JsonElement, CancellationToken, Task> PublishNotificationAsync { get; init; }
     public required Func<string, string?, string?, CancellationToken, Task> SetCodexIdsAsync { get; init; }
     public required Action<Func<CancellationToken, Task>> SetInterrupt { get; init; }

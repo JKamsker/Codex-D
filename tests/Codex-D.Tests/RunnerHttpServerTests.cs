@@ -167,6 +167,38 @@ public sealed class RunnerHttpServerTests
     }
 
     [Fact]
+    public async Task Runs_Create_PersistsOutputSchema_AndPassesToExecutor()
+    {
+        var exec = new OutputSchemaCapturingExecutor();
+        await using var host = await RunnerHttpTestHost.StartAsync(requireAuth: false, exec);
+        using var sdk = host.CreateSdkClient(includeToken: false);
+
+        var cwd = Path.Combine(host.StateDir, "repo");
+        Directory.CreateDirectory(cwd);
+
+        using var doc = JsonDocument.Parse("""{"type":"object","properties":{"answer":{"type":"string"}},"required":["answer"]}""");
+        var schema = doc.RootElement.Clone();
+        var expectedRaw = schema.GetRawText();
+
+        var created = await sdk.CreateRunAsync(
+            new CreateRunRequest { Cwd = cwd, Prompt = "hi", Model = null, Sandbox = null, ApprovalPolicy = "never", OutputSchema = schema },
+            CancellationToken.None);
+        var runId = created.RunId;
+
+        await WaitForTerminalAsync(sdk, runId, TimeSpan.FromSeconds(2));
+
+        await Task.WhenAny(exec.Captured.Task, Task.Delay(TimeSpan.FromSeconds(2)));
+        Assert.True(exec.Captured.Task.IsCompleted);
+
+        Assert.NotNull(exec.CapturedOutputSchema);
+        Assert.Equal(expectedRaw, exec.CapturedOutputSchema.Value.GetRawText());
+
+        var run = await sdk.GetRunAsync(runId, CancellationToken.None);
+        Assert.NotNull(run.OutputSchema);
+        Assert.Equal(expectedRaw, run.OutputSchema.Value.GetRawText());
+    }
+
+    [Fact]
     public async Task Runs_Create_ReturnsBadRequest_WhenCwdDoesNotExist()
     {
         await using var host = await RunnerHttpTestHost.StartAsync(requireAuth: false, new ImmediateSuccessExecutor());

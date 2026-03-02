@@ -31,6 +31,28 @@ internal sealed class ImmediateSuccessExecutor : IRunExecutor
     }
 }
 
+internal sealed class OutputSchemaCapturingExecutor : IRunExecutor
+{
+    public JsonElement? CapturedOutputSchema { get; private set; }
+
+    public TaskCompletionSource Captured { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+    public async Task<RunExecutionResult> ExecuteAsync(RunExecutionContext context, CancellationToken ct)
+    {
+        context.SetInterrupt(_ => Task.CompletedTask);
+
+        if (context.OutputSchema is { } schema &&
+            schema.ValueKind is not (JsonValueKind.Undefined or JsonValueKind.Null))
+        {
+            CapturedOutputSchema = schema.Clone();
+        }
+
+        Captured.TrySetResult();
+        await Task.CompletedTask;
+        return new RunExecutionResult { Status = RunStatuses.Succeeded, Error = null };
+    }
+}
+
 internal sealed class CoordinatedExecutor : IRunExecutor
 {
     public TaskCompletionSource FirstPublished { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);

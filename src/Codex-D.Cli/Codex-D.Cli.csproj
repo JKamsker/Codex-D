@@ -18,7 +18,7 @@
     <FrameworkReference Include="Microsoft.AspNetCore.App" />
     <PackageReference Include="Microsoft.AspNetCore.SignalR.Client" Version="10.0.3" />
     <PackageReference Include="Spectre.Console.Cli" Version="0.53.1" />
-    <PackageReference Include="JKToolKit.CodexSDK" Version="0.0.67" />
+    <PackageReference Include="JKToolKit.CodexSDK" Version="0.0.112" />
   </ItemGroup>
 
 </Project>

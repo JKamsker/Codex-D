@@ -1,5 +1,7 @@
 using CodexD.HttpRunner.Commands;
 using CodexD.HttpRunner.Commands.Run;
+using CodexD.HttpRunner.Commands.Thread;
+using CodexD.HttpRunner.Commands.Threads;
 using Spectre.Console.Cli;
 
 namespace CodexD.HttpRunner.Cli;
@@ -14,6 +16,34 @@ public static class HttpCli
 
             runs.AddCommand<LsCommand>("ls")
                 .WithDescription("List runs known by the server.");
+        });
+
+        config.AddBranch("threads", threads =>
+        {
+            threads.SetDescription("List threads known by the runner's codex runtime (app-server).");
+
+            threads.AddCommand<ThreadsLsCommand>("ls")
+                .WithDescription("List threads (thread/list).");
+        });
+
+        config.AddBranch("thread", thread =>
+        {
+            thread.SetDescription("Operate on a single thread.");
+
+            thread.AddCommand<ThreadReadCommand>("read")
+                .WithDescription("Read a thread (thread/read).");
+
+            thread.AddCommand<ThreadNameCommand>("name")
+                .WithDescription("Set thread name/title (thread/name/set).");
+
+            thread.AddCommand<ThreadArchiveCommand>("archive")
+                .WithDescription("Archive a thread (thread/archive).");
+
+            thread.AddCommand<ThreadUnarchiveCommand>("unarchive")
+                .WithDescription("Unarchive a thread (thread/unarchive).");
+
+            thread.AddCommand<ThreadForkCommand>("fork")
+                .WithDescription("Fork a thread (thread/fork).");
         });
 
         config.AddBranch("run", run =>

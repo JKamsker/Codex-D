@@ -2,6 +2,7 @@ using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Json;
 using CodexD.HttpRunner.Contracts;
+using CodexD.HttpRunner.Contracts.Threads;
 
 namespace CodexD.HttpRunner.Client;
 
@@ -99,6 +100,154 @@ public sealed class RunnerClient : IDisposable
 
         using var doc = JsonDocument.Parse(text);
         return doc.RootElement.Clone();
+    }
+
+    public async Task<ThreadListResponse> ListThreadsAsync(
+        bool? archived,
+        string? cwd,
+        string? query,
+        int? limit,
+        string? cursor,
+        string? sortKey,
+        CancellationToken ct)
+    {
+        var qp = new List<string>();
+
+        if (archived is { } a)
+        {
+            qp.Add($"archived={(a ? "true" : "false")}");
+        }
+
+        if (!string.IsNullOrWhiteSpace(cwd))
+        {
+            qp.Add($"cwd={Uri.EscapeDataString(cwd.Trim())}");
+        }
+
+        if (!string.IsNullOrWhiteSpace(query))
+        {
+            qp.Add($"q={Uri.EscapeDataString(query.Trim())}");
+        }
+
+        if (limit is { } l && l > 0)
+        {
+            qp.Add($"limit={l}");
+        }
+
+        if (!string.IsNullOrWhiteSpace(cursor))
+        {
+            qp.Add($"cursor={Uri.EscapeDataString(cursor.Trim())}");
+        }
+
+        if (!string.IsNullOrWhiteSpace(sortKey))
+        {
+            qp.Add($"sortKey={Uri.EscapeDataString(sortKey.Trim())}");
+        }
+
+        var url = qp.Count == 0 ? $"{_baseUrl}/v1/threads" : $"{_baseUrl}/v1/threads?{string.Join("&", qp)}";
+
+        using var res = await _http.GetAsync(url, ct);
+        var text = await res.Content.ReadAsStringAsync(ct);
+        if (!res.IsSuccessStatusCode)
+        {
+            throw new InvalidOperationException($"HTTP {(int)res.StatusCode}: {text}");
+        }
+
+        return JsonSerializer.Deserialize<ThreadListResponse>(text, Json)
+               ?? throw new InvalidOperationException("Invalid threads list JSON.");
+    }
+
+    public async Task<ThreadReadResponse> ReadThreadAsync(string threadId, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(threadId))
+        {
+            throw new ArgumentException("Missing thread id.", nameof(threadId));
+        }
+
+        using var res = await _http.GetAsync($"{_baseUrl}/v1/threads/{Uri.EscapeDataString(threadId.Trim())}", ct);
+        var text = await res.Content.ReadAsStringAsync(ct);
+        if (!res.IsSuccessStatusCode)
+        {
+            throw new InvalidOperationException($"HTTP {(int)res.StatusCode}: {text}");
+        }
+
+        return JsonSerializer.Deserialize<ThreadReadResponse>(text, Json)
+               ?? throw new InvalidOperationException("Invalid thread JSON.");
+    }
+
+    public async Task<ThreadReadResponse> SetThreadNameAsync(string threadId, string? name, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(threadId))
+        {
+            throw new ArgumentException("Missing thread id.", nameof(threadId));
+        }
+
+        var body = JsonSerializer.Serialize(new ThreadNameRequest { Name = name }, Json);
+        using var content = new StringContent(body, Encoding.UTF8, "application/json");
+        using var res = await _http.PostAsync($"{_baseUrl}/v1/threads/{Uri.EscapeDataString(threadId.Trim())}/name", content, ct);
+        var text = await res.Content.ReadAsStringAsync(ct);
+        if (!res.IsSuccessStatusCode)
+        {
+            throw new InvalidOperationException($"HTTP {(int)res.StatusCode}: {text}");
+        }
+
+        return JsonSerializer.Deserialize<ThreadReadResponse>(text, Json)
+               ?? throw new InvalidOperationException("Invalid thread JSON.");
+    }
+
+    public async Task<ThreadRawResponse> ArchiveThreadAsync(string threadId, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(threadId))
+        {
+            throw new ArgumentException("Missing thread id.", nameof(threadId));
+        }
+
+        using var res = await _http.PostAsync($"{_baseUrl}/v1/threads/{Uri.EscapeDataString(threadId.Trim())}/archive", content: null, ct);
+        var text = await res.Content.ReadAsStringAsync(ct);
+        if (!res.IsSuccessStatusCode)
+        {
+            throw new InvalidOperationException($"HTTP {(int)res.StatusCode}: {text}");
+        }
+
+        return JsonSerializer.Deserialize<ThreadRawResponse>(text, Json)
+               ?? throw new InvalidOperationException("Invalid thread JSON.");
+    }
+
+    public async Task<ThreadRawResponse> UnarchiveThreadAsync(string threadId, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(threadId))
+        {
+            throw new ArgumentException("Missing thread id.", nameof(threadId));
+        }
+
+        using var res = await _http.PostAsync($"{_baseUrl}/v1/threads/{Uri.EscapeDataString(threadId.Trim())}/unarchive", content: null, ct);
+        var text = await res.Content.ReadAsStringAsync(ct);
+        if (!res.IsSuccessStatusCode)
+        {
+            throw new InvalidOperationException($"HTTP {(int)res.StatusCode}: {text}");
+        }
+
+        return JsonSerializer.Deserialize<ThreadRawResponse>(text, Json)
+               ?? throw new InvalidOperationException("Invalid thread JSON.");
+    }
+
+    public async Task<ThreadRawResponse> ForkThreadAsync(string threadId, bool persistExtendedHistory, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(threadId))
+        {
+            throw new ArgumentException("Missing thread id.", nameof(threadId));
+        }
+
+        var body = JsonSerializer.Serialize(new ThreadForkRequest { PersistExtendedHistory = persistExtendedHistory }, Json);
+        using var content = new StringContent(body, Encoding.UTF8, "application/json");
+        using var res = await _http.PostAsync($"{_baseUrl}/v1/threads/{Uri.EscapeDataString(threadId.Trim())}/fork", content, ct);
+        var text = await res.Content.ReadAsStringAsync(ct);
+        if (!res.IsSuccessStatusCode)
+        {
+            throw new InvalidOperationException($"HTTP {(int)res.StatusCode}: {text}");
+        }
+
+        return JsonSerializer.Deserialize<ThreadRawResponse>(text, Json)
+               ?? throw new InvalidOperationException("Invalid thread JSON.");
     }
 
     public async Task InterruptAsync(Guid runId, CancellationToken ct)

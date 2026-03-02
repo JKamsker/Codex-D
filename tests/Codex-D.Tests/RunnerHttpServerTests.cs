@@ -27,6 +27,45 @@ public sealed class RunnerHttpServerTests
     }
 
     [Fact]
+    public async Task Threads_List_Returns503_WhenRuntimeDisabled()
+    {
+        await using var host = await RunnerHttpTestHost.StartAsync(requireAuth: false, new ImmediateSuccessExecutor());
+        using var client = host.CreateHttpClient(includeToken: false);
+
+        var res = await client.GetAsync("/v1/threads");
+        Assert.Equal(HttpStatusCode.ServiceUnavailable, res.StatusCode);
+
+        var json = await res.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal("codex_runtime_disabled", json.GetProperty("error").GetString());
+    }
+
+    [Fact]
+    public async Task Threads_Read_Returns503_WhenRuntimeDisabled()
+    {
+        await using var host = await RunnerHttpTestHost.StartAsync(requireAuth: false, new ImmediateSuccessExecutor());
+        using var client = host.CreateHttpClient(includeToken: false);
+
+        var res = await client.GetAsync("/v1/threads/thread-test");
+        Assert.Equal(HttpStatusCode.ServiceUnavailable, res.StatusCode);
+
+        var json = await res.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal("codex_runtime_disabled", json.GetProperty("error").GetString());
+    }
+
+    [Fact]
+    public async Task Threads_Archive_Returns503_WhenRuntimeDisabled()
+    {
+        await using var host = await RunnerHttpTestHost.StartAsync(requireAuth: false, new ImmediateSuccessExecutor());
+        using var client = host.CreateHttpClient(includeToken: false);
+
+        var res = await client.PostAsync("/v1/threads/thread-test/archive", content: null);
+        Assert.Equal(HttpStatusCode.ServiceUnavailable, res.StatusCode);
+
+        var json = await res.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal("codex_runtime_disabled", json.GetProperty("error").GetString());
+    }
+
+    [Fact]
     public async Task Info_ReturnsRunnerMetadata()
     {
         await using var host = await RunnerHttpTestHost.StartAsync(requireAuth: false, new ImmediateSuccessExecutor());

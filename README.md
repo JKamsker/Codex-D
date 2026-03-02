@@ -178,6 +178,30 @@ Show CLI + server versions (daemon/foreground):
 codex-d version
 ```
 
+### Threads (app-server)
+
+List threads (defaults to current directory; use `--all` for everything):
+
+```bash
+codex-d threads ls
+codex-d threads ls --all
+```
+
+Read a thread:
+
+```bash
+codex-d thread read <THREAD_ID>
+```
+
+Rename/archive/fork:
+
+```bash
+codex-d thread name <THREAD_ID> "New name"
+codex-d thread archive <THREAD_ID>
+codex-d thread unarchive <THREAD_ID>
+codex-d thread fork <THREAD_ID>
+```
+
 Client env vars:
 - `CODEX_D_URL` (explicit URL override; wins over daemon discovery)
 - `CODEX_D_TOKEN`

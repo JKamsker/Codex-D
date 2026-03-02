@@ -3,6 +3,7 @@ using System.Text;
 using System.Text.Json;
 using CodexD.HttpRunner.CodexRuntime;
 using CodexD.HttpRunner.Contracts;
+using CodexD.HttpRunner.Contracts.Threads;
 using CodexD.Shared.Paths;
 using CodexD.HttpRunner.Runs;
 using JKToolKit.CodexSDK.AppServer;
@@ -213,6 +214,351 @@ public static class Host
                 stateDir = cfg.StateDirectory,
                 baseUrl
             });
+        });
+
+        app.MapGet("/v1/threads", async (HttpRequest req, RuntimeState state, CancellationToken ct) =>
+        {
+            if (!enableCodexRuntime)
+            {
+                return Results.Json(
+                    new { error = "codex_runtime_disabled" },
+                    Json,
+                    statusCode: StatusCodes.Status503ServiceUnavailable);
+            }
+
+            var client = state.TryGetClient();
+            if (client is null)
+            {
+                return Results.Json(
+                    new { error = "codex_runtime_starting" },
+                    Json,
+                    statusCode: StatusCodes.Status503ServiceUnavailable);
+            }
+
+            var listParams = new ThreadListParams
+            {
+                Archived = ParseBool(req.Query["archived"]),
+                Cwd = string.IsNullOrWhiteSpace(req.Query["cwd"]) ? null : req.Query["cwd"].ToString(),
+                SearchTerm = string.IsNullOrWhiteSpace(req.Query["q"]) ? null : req.Query["q"].ToString(),
+                Limit = ParseInt(req.Query["limit"]),
+                Cursor = string.IsNullOrWhiteSpace(req.Query["cursor"]) ? null : req.Query["cursor"].ToString(),
+                SortKey = string.IsNullOrWhiteSpace(req.Query["sortKey"]) ? null : req.Query["sortKey"].ToString()
+            };
+
+            try
+            {
+                var result = await client.CallAsync("thread/list", listParams, ct);
+                var parsed = ThreadApiParsing.ParseThreadListResponse(result);
+                return Results.Ok(parsed);
+            }
+            catch (CodexAppServerRequestFailedException ex)
+            {
+                return Results.Json(
+                    new { error = "codex_request_failed", method = ex.Method, errorCode = ex.ErrorCode, errorMessage = ex.ErrorMessage },
+                    Json,
+                    statusCode: StatusCodes.Status502BadGateway);
+            }
+            catch (Exception ex) when (ex is CodexAppServerDisconnectedException or CodexAppServerUnavailableException)
+            {
+                return Results.Json(
+                    new { error = "codex_runtime_unavailable" },
+                    Json,
+                    statusCode: StatusCodes.Status503ServiceUnavailable);
+            }
+            catch (Exception ex)
+            {
+                return Results.Json(
+                    new { error = "thread_list_failed", message = ex.Message },
+                    Json,
+                    statusCode: StatusCodes.Status502BadGateway);
+            }
+        });
+
+        app.MapGet("/v1/threads/{threadId}", async (string threadId, RuntimeState state, CancellationToken ct) =>
+        {
+            if (!enableCodexRuntime)
+            {
+                return Results.Json(
+                    new { error = "codex_runtime_disabled" },
+                    Json,
+                    statusCode: StatusCodes.Status503ServiceUnavailable);
+            }
+
+            var client = state.TryGetClient();
+            if (client is null)
+            {
+                return Results.Json(
+                    new { error = "codex_runtime_starting" },
+                    Json,
+                    statusCode: StatusCodes.Status503ServiceUnavailable);
+            }
+
+            if (string.IsNullOrWhiteSpace(threadId))
+            {
+                return Results.BadRequest(new { error = "thread_id_required" });
+            }
+
+            threadId = threadId.Trim();
+
+            try
+            {
+                var result = await client.CallAsync("thread/read", new ThreadReadParams { ThreadId = threadId }, ct);
+                var parsed = ThreadApiParsing.ParseThreadReadResponse(result);
+                return Results.Ok(parsed);
+            }
+            catch (CodexAppServerRequestFailedException ex)
+            {
+                return Results.Json(
+                    new { error = "codex_request_failed", method = ex.Method, errorCode = ex.ErrorCode, errorMessage = ex.ErrorMessage },
+                    Json,
+                    statusCode: StatusCodes.Status502BadGateway);
+            }
+            catch (Exception ex) when (ex is CodexAppServerDisconnectedException or CodexAppServerUnavailableException)
+            {
+                return Results.Json(
+                    new { error = "codex_runtime_unavailable" },
+                    Json,
+                    statusCode: StatusCodes.Status503ServiceUnavailable);
+            }
+            catch (Exception ex)
+            {
+                return Results.Json(
+                    new { error = "thread_read_failed", message = ex.Message },
+                    Json,
+                    statusCode: StatusCodes.Status502BadGateway);
+            }
+        });
+
+        app.MapPost("/v1/threads/{threadId}/name", async (string threadId, ThreadNameRequest? request, RuntimeState state, CancellationToken ct) =>
+        {
+            if (!enableCodexRuntime)
+            {
+                return Results.Json(
+                    new { error = "codex_runtime_disabled" },
+                    Json,
+                    statusCode: StatusCodes.Status503ServiceUnavailable);
+            }
+
+            var client = state.TryGetClient();
+            if (client is null)
+            {
+                return Results.Json(
+                    new { error = "codex_runtime_starting" },
+                    Json,
+                    statusCode: StatusCodes.Status503ServiceUnavailable);
+            }
+
+            if (string.IsNullOrWhiteSpace(threadId))
+            {
+                return Results.BadRequest(new { error = "thread_id_required" });
+            }
+
+            if (request is null)
+            {
+                return Results.BadRequest(new { error = "missing_body" });
+            }
+
+            threadId = threadId.Trim();
+            var name = request.Name is null ? string.Empty : request.Name.Trim();
+
+            try
+            {
+                await client.CallAsync("thread/name/set", new ThreadSetNameParams { ThreadId = threadId, Name = name }, ct);
+                var read = await client.CallAsync("thread/read", new ThreadReadParams { ThreadId = threadId }, ct);
+                var parsed = ThreadApiParsing.ParseThreadReadResponse(read);
+                return Results.Ok(parsed);
+            }
+            catch (CodexAppServerRequestFailedException ex)
+            {
+                return Results.Json(
+                    new { error = "codex_request_failed", method = ex.Method, errorCode = ex.ErrorCode, errorMessage = ex.ErrorMessage },
+                    Json,
+                    statusCode: StatusCodes.Status502BadGateway);
+            }
+            catch (Exception ex) when (ex is CodexAppServerDisconnectedException or CodexAppServerUnavailableException)
+            {
+                return Results.Json(
+                    new { error = "codex_runtime_unavailable" },
+                    Json,
+                    statusCode: StatusCodes.Status503ServiceUnavailable);
+            }
+            catch (Exception ex)
+            {
+                return Results.Json(
+                    new { error = "thread_name_failed", message = ex.Message },
+                    Json,
+                    statusCode: StatusCodes.Status502BadGateway);
+            }
+        });
+
+        app.MapPost("/v1/threads/{threadId}/archive", async (string threadId, RuntimeState state, CancellationToken ct) =>
+        {
+            if (!enableCodexRuntime)
+            {
+                return Results.Json(
+                    new { error = "codex_runtime_disabled" },
+                    Json,
+                    statusCode: StatusCodes.Status503ServiceUnavailable);
+            }
+
+            var client = state.TryGetClient();
+            if (client is null)
+            {
+                return Results.Json(
+                    new { error = "codex_runtime_starting" },
+                    Json,
+                    statusCode: StatusCodes.Status503ServiceUnavailable);
+            }
+
+            if (string.IsNullOrWhiteSpace(threadId))
+            {
+                return Results.BadRequest(new { error = "thread_id_required" });
+            }
+
+            threadId = threadId.Trim();
+
+            try
+            {
+                var result = await client.CallAsync("thread/archive", new ThreadArchiveParams { ThreadId = threadId }, ct);
+                var id = ThreadApiParsing.ExtractThreadId(result) ?? threadId;
+                return Results.Ok(new ThreadRawResponse { ThreadId = id, Raw = result.Clone() });
+            }
+            catch (CodexAppServerRequestFailedException ex)
+            {
+                return Results.Json(
+                    new { error = "codex_request_failed", method = ex.Method, errorCode = ex.ErrorCode, errorMessage = ex.ErrorMessage },
+                    Json,
+                    statusCode: StatusCodes.Status502BadGateway);
+            }
+            catch (Exception ex) when (ex is CodexAppServerDisconnectedException or CodexAppServerUnavailableException)
+            {
+                return Results.Json(
+                    new { error = "codex_runtime_unavailable" },
+                    Json,
+                    statusCode: StatusCodes.Status503ServiceUnavailable);
+            }
+            catch (Exception ex)
+            {
+                return Results.Json(
+                    new { error = "thread_archive_failed", message = ex.Message },
+                    Json,
+                    statusCode: StatusCodes.Status502BadGateway);
+            }
+        });
+
+        app.MapPost("/v1/threads/{threadId}/unarchive", async (string threadId, RuntimeState state, CancellationToken ct) =>
+        {
+            if (!enableCodexRuntime)
+            {
+                return Results.Json(
+                    new { error = "codex_runtime_disabled" },
+                    Json,
+                    statusCode: StatusCodes.Status503ServiceUnavailable);
+            }
+
+            var client = state.TryGetClient();
+            if (client is null)
+            {
+                return Results.Json(
+                    new { error = "codex_runtime_starting" },
+                    Json,
+                    statusCode: StatusCodes.Status503ServiceUnavailable);
+            }
+
+            if (string.IsNullOrWhiteSpace(threadId))
+            {
+                return Results.BadRequest(new { error = "thread_id_required" });
+            }
+
+            threadId = threadId.Trim();
+
+            try
+            {
+                var result = await client.CallAsync("thread/unarchive", new ThreadUnarchiveParams { ThreadId = threadId }, ct);
+                var id = ThreadApiParsing.ExtractThreadId(result) ?? threadId;
+                return Results.Ok(new ThreadRawResponse { ThreadId = id, Raw = result.Clone() });
+            }
+            catch (CodexAppServerRequestFailedException ex)
+            {
+                return Results.Json(
+                    new { error = "codex_request_failed", method = ex.Method, errorCode = ex.ErrorCode, errorMessage = ex.ErrorMessage },
+                    Json,
+                    statusCode: StatusCodes.Status502BadGateway);
+            }
+            catch (Exception ex) when (ex is CodexAppServerDisconnectedException or CodexAppServerUnavailableException)
+            {
+                return Results.Json(
+                    new { error = "codex_runtime_unavailable" },
+                    Json,
+                    statusCode: StatusCodes.Status503ServiceUnavailable);
+            }
+            catch (Exception ex)
+            {
+                return Results.Json(
+                    new { error = "thread_unarchive_failed", message = ex.Message },
+                    Json,
+                    statusCode: StatusCodes.Status502BadGateway);
+            }
+        });
+
+        app.MapPost("/v1/threads/{threadId}/fork", async (string threadId, ThreadForkRequest? request, RuntimeState state, CancellationToken ct) =>
+        {
+            if (!enableCodexRuntime)
+            {
+                return Results.Json(
+                    new { error = "codex_runtime_disabled" },
+                    Json,
+                    statusCode: StatusCodes.Status503ServiceUnavailable);
+            }
+
+            var client = state.TryGetClient();
+            if (client is null)
+            {
+                return Results.Json(
+                    new { error = "codex_runtime_starting" },
+                    Json,
+                    statusCode: StatusCodes.Status503ServiceUnavailable);
+            }
+
+            if (string.IsNullOrWhiteSpace(threadId))
+            {
+                return Results.BadRequest(new { error = "thread_id_required" });
+            }
+
+            threadId = threadId.Trim();
+            var persistExtendedHistory = request?.PersistExtendedHistory ?? false;
+
+            try
+            {
+                var result = await client.CallAsync(
+                    "thread/fork",
+                    new ThreadForkParams { ThreadId = threadId, PersistExtendedHistory = persistExtendedHistory },
+                    ct);
+
+                var id = ThreadApiParsing.ExtractThreadId(result);
+                return Results.Ok(new ThreadRawResponse { ThreadId = id, Raw = result.Clone() });
+            }
+            catch (CodexAppServerRequestFailedException ex)
+            {
+                return Results.Json(
+                    new { error = "codex_request_failed", method = ex.Method, errorCode = ex.ErrorCode, errorMessage = ex.ErrorMessage },
+                    Json,
+                    statusCode: StatusCodes.Status502BadGateway);
+            }
+            catch (Exception ex) when (ex is CodexAppServerDisconnectedException or CodexAppServerUnavailableException)
+            {
+                return Results.Json(
+                    new { error = "codex_runtime_unavailable" },
+                    Json,
+                    statusCode: StatusCodes.Status503ServiceUnavailable);
+            }
+            catch (Exception ex)
+            {
+                return Results.Json(
+                    new { error = "thread_fork_failed", message = ex.Message },
+                    Json,
+                    statusCode: StatusCodes.Status502BadGateway);
+            }
         });
 
         app.MapPost("/v1/runs", async (CreateRunRequest request, RunManager runs, CancellationToken ct) =>
